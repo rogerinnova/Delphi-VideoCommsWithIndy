@@ -1,0 +1,10 @@
+### Library Extracts
+One of the great things about Delphi, promoted in the distant past, is its smart linker.
+This means I can store my accumulated experience in *Library Files*. Rather than cutting and pasting from a past project I include the library directory in my project search path and reference functions directly in my code. 
+The functions are loosely grouped into files with semi meaningful names. The smart linker then includes only used functions and object in any executeable (witness the lack of green dots when debugging).
+
+I improve and expand my library code as required while maintaining backward compatibility. I have unit tests for much of this functionality although tests are generally created to resolve a problem or develope multi platform compatibility.
+
+This general library approach has a downside when sharing the code for final applications in that you need to do the cutting and pasting previously avoided or produce DCUs of the library code. 
+
+This can be an onerous task as libraries often rely on other libraries, In this repository I have decided to simply publish the libraries used. Most of the code here will not be used in the associated demonstrations.   

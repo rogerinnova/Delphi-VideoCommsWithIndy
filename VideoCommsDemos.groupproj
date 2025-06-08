@@ -1,0 +1,48 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{2100605B-2EB6-4918-8BC7-A65E1E8B5DFD}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="VideoPresentationExamples\VclImageDemo.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="VideoPresentationExamples\FMXImageDemo.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="VclImageDemo">
+        <MSBuild Projects="VideoPresentationExamples\VclImageDemo.dproj"/>
+    </Target>
+    <Target Name="VclImageDemo:Clean">
+        <MSBuild Projects="VideoPresentationExamples\VclImageDemo.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="VclImageDemo:Make">
+        <MSBuild Projects="VideoPresentationExamples\VclImageDemo.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="FMXImageDemo">
+        <MSBuild Projects="VideoPresentationExamples\FMXImageDemo.dproj"/>
+    </Target>
+    <Target Name="FMXImageDemo:Clean">
+        <MSBuild Projects="VideoPresentationExamples\FMXImageDemo.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="FMXImageDemo:Make">
+        <MSBuild Projects="VideoPresentationExamples\FMXImageDemo.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="VclImageDemo;FMXImageDemo"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="VclImageDemo:Clean;FMXImageDemo:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="VclImageDemo:Make;FMXImageDemo:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>
