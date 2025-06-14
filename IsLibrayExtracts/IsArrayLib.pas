@@ -107,8 +107,10 @@ procedure ConcatTwoDArrayInX(var AConcat: TTwoDArrayOfAnsiString;
 
 Procedure InsertIntoArray(var AArray: TArrayofObjects;
   AInsertAt, AInsertNo: Integer); overload;
+// Inserts nils into Array
 Procedure InsertIntoArray(var AArray: TArrayofInteger;
   AInsertAt, AInsertNo: Integer); overload;
+// Inserts 0s into Array
 
 procedure MergeIntoTwoDArray(var AMergeInto, AMergeFrom: TTwoDArrayofInteger;
   AMergCol: Integer = 0; AThenMergeBack: Boolean = false;
@@ -3264,7 +3266,7 @@ end;
 
 Procedure InsertIntoArray(var AArray: TArrayofObjects;
   AInsertAt, AInsertNo: Integer); overload;
-// Inserts nil into Array
+// Inserts nils into Array
 Var
   NxtWrite, NxtRead, NewLength, OldLength: Integer;
 begin
@@ -3287,7 +3289,7 @@ end;
 
 Procedure InsertIntoArray(var AArray: TArrayofInteger;
   AInsertAt, AInsertNo: Integer); overload;
-// Inserts 0 into Array
+// Inserts 0s into Array
 Var
   NxtWrite, NxtRead, NewLength, OldLength: Integer;
 begin

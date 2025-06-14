@@ -20,12 +20,11 @@ Type
 
   TImageCntrlManager = class(TObject)
   private
-    FTabPnl: TPanel;
-    FDefaultBitMap: TBitmap;
-    // FImagesPanel: TPanel;
+    FImagesPanel: TPanel;
     FImageArray: TImageArray;
-    FCurrentPrime: TImagePosObj;
     FPArray: TImagePosObjArray;
+    FCurrentPrime: TImagePosObj;
+    FDefaultBitMap: TBitmap;
     Function DefaultBitMap: TBitmap;
     Procedure DoOnPanelResize(Sender: TObject);
     Procedure ImageClicked(APosObj: TImagePosObj);
@@ -202,7 +201,7 @@ begin
   if FImageManager = nil then
     Raise Exception.Create('Must Have FImageCtrlManager');
   FPresetBmp := FImageManager.DefaultBitMap; // testing
-  FParentPanel := FImageManager.FTabPnl;
+  FParentPanel := FImageManager.FImagesPanel;
   Inherited Create;
 end;
 
@@ -276,11 +275,11 @@ end;
 
 constructor TImageCntrlManager.Create(ATabPnl: TPanel; ANoOfChnls: Integer);
 begin
-  FTabPnl := ATabPnl;
-  if FTabPnl = nil then
+  FImagesPanel := ATabPnl;
+  if FImagesPanel = nil then
     Exit;
 
-  GrowImageLists(FTabPnl, ANoOfChnls);
+  GrowImageLists(FImagesPanel, ANoOfChnls);
 end;
 
 function TImageCntrlManager.DefaultBitMap: TBitmap;
@@ -326,7 +325,7 @@ end;
 procedure TImageCntrlManager.DoOnPanelResize(Sender: TObject);
 begin
   // if Sender=FTabPnl then
-  SetImagePanels(FTabPnl);
+  SetImagePanels(FImagesPanel);
 end;
 
 function TImageCntrlManager.FindNullImage(AListOfCurrentRx: TStrings;
@@ -368,16 +367,16 @@ Var
   CurrentLength: Integer;
   IDX: Integer;
 begin
-  if ATabPnl <> FTabPnl then
+  if ATabPnl <> FImagesPanel then
   Begin
     ISIndyUtilsException(Self, 'ATab<>FTab GrowImageLists');
     Exit;
   End;
   try
-    if FTabPnl = nil then
+    if FImagesPanel = nil then
       Exit;
 
-    FTabPnl.OnResize := DoOnPanelResize;
+    FImagesPanel.OnResize := DoOnPanelResize;
     CurrentLength := Length(FImageArray);
     if CurrentLength < ANoOfChnls then
     Begin
@@ -394,7 +393,7 @@ begin
         NewImageCtrl.OnClick := FPArray[CurrentLength].OnImageClick;
         NewImageCtrl.Bitmap := DefaultBitMap;
         NewImageCtrl.Name := ATabPnl.Name + 'Im' + IntToStr(CurrentLength);
-        NewImageCtrl.Parent := FTabPnl; // parent
+        NewImageCtrl.Parent := FImagesPanel; // parent
         FImageArray[CurrentLength] := NewImageCtrl;
         inc(CurrentLength);
       End;
@@ -403,7 +402,7 @@ begin
     End;
     // if ShortSliderForm.FNoAutoImgs <> ANoOfChnls then
     // ShortSliderForm.ReviewImages;
-    SetImagePanels(FTabPnl);
+    SetImagePanels(FImagesPanel);
   except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'GrowImageLists');
@@ -416,7 +415,7 @@ begin
     FCurrentPrime := nil
   else
     FCurrentPrime := APosObj;
-  SetImagePanels(FTabPnl);
+  SetImagePanels(FImagesPanel);
 end;
 
 function TImageCntrlManager.ImageControl(AIndx: Integer): TImageControl;
@@ -460,7 +459,7 @@ begin
     NewImage.OnClick := FPArray[I].OnImageClick;
     // NewImageCtrl.Bitmap := DefaultBitMap;
     NewImage.Name := ATabPnl.Name + 'Im' + IntToStr(CurrentLength - I);
-    NewImage.Parent := FTabPnl; // parent
+    NewImage.Parent := FImagesPanel; // parent
     // NewImage.Stretch := true;
     // NewImage.Proportional := true;
     FImageArray[I] := NewImage;
@@ -468,7 +467,7 @@ begin
 
   for I := 0 to (CurrentLength - 1) do
     FPArray[I].ReSetValues(I, TPointF.Zero, TPointF.Zero, TPointF.Zero);
-  SetImagePanels(FTabPnl);
+  SetImagePanels(FImagesPanel);
 End;
 
 procedure TImageCntrlManager.SetImagePanels(ATabPnl: TPanel);
@@ -480,7 +479,7 @@ Var
 begin
   if ATabPnl = nil then
     Exit;
-  if ATabPnl <> FTabPnl then
+  if ATabPnl <> FImagesPanel then
   Begin
     ISIndyUtilsException(Self, 'ATab<>FTab GrowImageLists');
     Exit;
@@ -496,9 +495,9 @@ begin
     if ImgCnt < 1 then
       Exit;
 
-    PnlWidth := FTabPnl.Width;
-    PnlHeight := FTabPnl.Height;
-    ThisScale := FTabPnl.Scale.Point;
+    PnlWidth := FImagesPanel.Width;
+    PnlHeight := FImagesPanel.Height;
+    ThisScale := FImagesPanel.Scale.Point;
     Landscape := PnlWidth > PnlHeight;
 
     if FCurrentPrime <> nil then

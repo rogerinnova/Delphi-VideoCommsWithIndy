@@ -9,6 +9,9 @@ uses
 
 begin
   Application.Initialize;
+{$ifDef Debug}
+  System.RandSeed:=0;
+{$EndIf}
   Application.MainFormOnTaskbar := True;
   Application.CreateForm(TFormVCLImageDemo, FormVCLImageDemo);
   Application.Run;

@@ -8,4 +8,4 @@ This requires some demonstration projects and perhaps more importantly documenta
 
 # Status
 
-At this time the GitHub Repository is a place marker as work commences
+Still early days some library files added and a first cut of the display demos.
