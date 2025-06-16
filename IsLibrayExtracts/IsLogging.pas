@@ -5,7 +5,7 @@ interface
 
 uses
 {$IFDEF FPC}
- SyncObjs, Classes, IsLazarusPickup
+ SyncObjs, Classes, SysUtils, IsLazarusPickup
 {$ELSE}
     System.IOUtils, SyncObjs,
   Classes
@@ -109,7 +109,12 @@ var
   LogFT: TLogFile = nil;
   IsNew: Integer = 67;
 
-  procedure PurgeFilesOlderThan(AMask: AnsiString; APurgeDate: TDateTime);
+procedure PurgeFilesOlderThan(AMask: AnsiString; APurgeDate: TDateTime);
+{$IFNDEF MsWindows}
+Begin
+
+end;
+{$Else}
 var
   SrchRec: TSearchRec;
   Rslt, FileDateVal, FileDateNow: Integer;
@@ -150,6 +155,7 @@ begin
     FindClose(SrchRec);
   end;
 end;
+{$ENDIF}
 
 Function ISLogFileName(AInTemp: Boolean = true;
   AInDocs: Boolean = true): String;

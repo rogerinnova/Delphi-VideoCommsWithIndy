@@ -1875,7 +1875,8 @@ begin
     else
       Begin
         s := s + '   Enc:' + FormatDateTime('dd mm yy', StartKeyCode);
-        Raise Exception(s);
+        UniqueString(s);
+        Raise Exception.Create(s);
       End;
     end; // case
 
