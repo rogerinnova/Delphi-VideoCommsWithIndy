@@ -264,6 +264,9 @@ function TDemoMediaCapture.ListOfImageConnections: TStringList;
 begin
   if FListOfImageConnections = nil then
   Begin
+    AddVideoCommsChannel(nil);
+    //to set FVideoComsChannels<>nil
+
     FListOfImageConnections := TStringList.Create;
     FListOfImageConnections.Sorted := True;
     FListOfImageConnections.OwnsObjects := True;

@@ -543,10 +543,11 @@ Var
   I: integer; // Takes ownership of AObject
 begin
   Try
-    AObj.SetManager(Self);
     if FVideoComsChannels = nil then
       FVideoComsChannels := TList<TVideoComsChannel>.Create;
-
+    if AObj=nil then
+        Exit;
+    AObj.SetManager(Self);
     if FVideoComsChannels.count < 1 then
       I := -1
     else
