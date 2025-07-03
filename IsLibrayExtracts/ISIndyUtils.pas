@@ -436,6 +436,19 @@ begin
 {$IFDEF Android}
     Result := System.IOUtils.TPath.Combine(System.IOUtils.TPath.GetHomePath,
       'AppExceptLog');
+{
+Need to follow up Chester Wilson post
+https://forums.adug.org.au/t/file-access-assistance-for-android/60847
+
+>If some of you are still struggling with Android file i/o, this may be some help.
+>I have spent the last few months trying hard (with a huge amount of support and help from Dave Nottage!) to put together a programme which can find files, read files (character and getting the android system to view them), write and append to files, create directories, and delete files and directories.
+>It is not the fastest, using the routines which are nearly simple enough for me to understand. If you have a directory with a thousand files, be prepared to enjoy a cup of tea while you wait!
+>
+>This programme “FileAccess” is available via
+>https://59b7770ca3fb18e4e90d-52e2682744779750b5103bbecf998085.ssl.cf2.rackcdn.com/FileAccess.zip
+
+}
+
 {$ELSE}
     Result := ChangeFileExt(ExeFileNameAllPlatforms, '.log');
 {$ENDIF}

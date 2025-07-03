@@ -3,7 +3,7 @@ unit IsImageManager;
 interface
 
 uses
-  System.SysUtils, System.Types, System.UITypes, System.Classes,
+  System.Math, System.SysUtils, System.Types, System.UITypes, System.Classes,
   System.Variants, IsMediaCommsObjs, IsRemoteConnectionIndyTcpObjs,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   // FMX.DialogService,
@@ -26,22 +26,24 @@ Type
     FCurrentPrime: TImagePosObj;
     FDefaultBitMap: TBitmap;
     Function DefaultBitMap: TBitmap;
+    Procedure SetRowsCols(APnlWidth, APnlHeight: single;
+      Out AColCnt, ARowCnt: integer);
     Procedure DoOnPanelResize(Sender: TObject);
     Procedure ImageClicked(APosObj: TImagePosObj);
   public
-    Constructor Create(ATabPnl: TPanel; ANoOfChnls: Integer);
+    Constructor Create(ATabPnl: TPanel; ANoOfChnls: integer);
     Destructor Destroy; override;
     Procedure SetImagePanels(ATabPnl: TPanel);
-    Procedure InsertImagesAt(ATabPnl: TPanel; AAddAt, ANoToAdd: Integer);
-    Procedure GrowImageLists(ATabPnl: TPanel; ANoOfChnls: Integer);
+    Procedure InsertImagesAt(ATabPnl: TPanel; AAddAt, ANoToAdd: integer);
+    Procedure GrowImageLists(ATabPnl: TPanel; ANoOfChnls: integer);
     Procedure DisConnectInactiveImageChannels(AListOfCurrentRx: TStrings;
-      AMinutesInActive: Integer);
+      AMinutesInActive: integer);
     Procedure BlankInactiveImageChannels(AListOfCurrentRx: TStrings;
-      AMinutesInActive: Integer);
-    Function ImageControl(AIndx: Integer): TImageControl;
+      AMinutesInActive: integer);
+    Function ImageControl(AIndx: integer): TImageControl;
     Function ImageControlArray: TImageArray;
     Function FindNullImage(AListOfCurrentRx: TStrings;
-      ANoImagesReservedExternalToList: Integer): TImageControl;
+      ANoImagesReservedExternalToList: integer): TImageControl;
   end;
 
   TImagePosObj = class(TObject)
@@ -54,7 +56,7 @@ Type
     FPresetBmp: TBitmap;
     FParentPanel: TPanel;
     FSz, FPos, FScale: TPointF;
-    Procedure ReSetValues(AThisIndx: Integer; ASz, APos, AScale: TPointF);
+    Procedure ReSetValues(AThisIndx: integer; ASz, APos, AScale: TPointF);
   end;
 
   TVideoChnlLink = class(TObject)
@@ -62,7 +64,7 @@ Type
     FLinkRef: string;
     FImage: TImageControl;
     FHost: string;
-    FPort: Integer;
+    FPort: integer;
     FSyncBitmap: Boolean;
     FVideoComs: TVideoComsChannel;
     FLastRxGraphicTime: TDateTime;
@@ -72,20 +74,21 @@ Type
     Procedure ChannelClosing(ASender: TObject);
     procedure SetImage(const Value: TImageControl);
   Public
-    Constructor Create(AHost: String; APort: Integer; ALinkRef: String;
+    Constructor Create(AHost: String; APort: integer; ALinkRef: String;
       AImage: TImageControl);
     Destructor Destroy; override;
-    Procedure DisConnectInactiveChannel(AInLastNoMins: Integer);
-    Procedure BlankInactiveChannel(AInLastNoMins: Integer);
+    Procedure DisConnectInactiveChannel(AInLastNoMins: integer);
+    Procedure BlankInactiveChannel(AInLastNoMins: integer);
     Procedure RxGraphic(AGraphic: TBitmap);
     Function VideoComs: TVideoComsChannel;
-    Function VideoIsActive(AInLastNoMins: Integer): Boolean;
+    Function VideoIsActive(AInLastNoMins: integer): Boolean;
     Property Image: TImageControl write SetImage;
     Property LinkRef: string read FLinkRef;
   end;
 
 Var
   GblDefaultBitMap: TBitmap = nil;
+  cTstAspect: single = 0.5;
 
 implementation
 
@@ -217,7 +220,7 @@ begin
   ISIndyUtilsException(Self, 'Blank TImagePosObj.OnImageClick')
 end;
 
-procedure TImagePosObj.ReSetValues(AThisIndx: Integer;
+procedure TImagePosObj.ReSetValues(AThisIndx: integer;
   ASz, APos, AScale: TPointF);
 begin
   if (Length(FImageManager.FImageArray) <= AThisIndx) or
@@ -260,9 +263,9 @@ end;
 { TImageCntrlManager }
 
 procedure TImageCntrlManager.BlankInactiveImageChannels(AListOfCurrentRx
-  : TStrings; AMinutesInActive: Integer);
+  : TStrings; AMinutesInActive: integer);
 Var
-  IDX: Integer;
+  IDX: integer;
 begin
   if AListOfCurrentRx = nil then
     Exit;
@@ -273,7 +276,7 @@ begin
           .BlankInactiveChannel(AMinutesInActive);
 end;
 
-constructor TImageCntrlManager.Create(ATabPnl: TPanel; ANoOfChnls: Integer);
+constructor TImageCntrlManager.Create(ATabPnl: TPanel; ANoOfChnls: integer);
 begin
   FImagesPanel := ATabPnl;
   if FImagesPanel = nil then
@@ -309,9 +312,9 @@ begin
 end;
 
 procedure TImageCntrlManager.DisConnectInactiveImageChannels(AListOfCurrentRx
-  : TStrings; AMinutesInActive: Integer);
+  : TStrings; AMinutesInActive: integer);
 Var
-  IDX: Integer;
+  IDX: integer;
 begin
   if AListOfCurrentRx = nil then
     Exit;
@@ -329,9 +332,9 @@ begin
 end;
 
 function TImageCntrlManager.FindNullImage(AListOfCurrentRx: TStrings;
-  ANoImagesReservedExternalToList: Integer): TImageControl;
+  ANoImagesReservedExternalToList: integer): TImageControl;
 Var
-  IDX, NextManual: Integer;
+  IDX, NextManual: integer;
   LImage, TstImage: TObject;
 begin
   NextManual := ANoImagesReservedExternalToList;
@@ -361,11 +364,11 @@ begin
 end;
 
 procedure TImageCntrlManager.GrowImageLists(ATabPnl: TPanel;
-  ANoOfChnls: Integer);
+  ANoOfChnls: integer);
 Var
   NewImageCtrl: TImageControl;
-  CurrentLength: Integer;
-  IDX: Integer;
+  CurrentLength: integer;
+  IDX: integer;
 begin
   if ATabPnl <> FImagesPanel then
   Begin
@@ -418,7 +421,7 @@ begin
   SetImagePanels(FImagesPanel);
 end;
 
-function TImageCntrlManager.ImageControl(AIndx: Integer): TImageControl;
+function TImageCntrlManager.ImageControl(AIndx: integer): TImageControl;
 begin
   if AIndx < Length(FImageArray) then
     Result := FImageArray[AIndx] As TImageControl
@@ -435,10 +438,10 @@ begin
 end;
 
 procedure TImageCntrlManager.InsertImagesAt(ATabPnl: TPanel;
-  AAddAt, ANoToAdd: Integer);
+  AAddAt, ANoToAdd: integer);
 Var
   ThisArray: TArrayofObjects;
-  I, CurrentLength: Integer;
+  I, CurrentLength: integer;
   NewImage: TImageControl;
 begin
   ThisArray := TArrayofObjects(FImageArray);
@@ -472,10 +475,9 @@ End;
 
 procedure TImageCntrlManager.SetImagePanels(ATabPnl: TPanel);
 Var
-  ImgIdx, ImgCnt, ColCnt, RowCnt, ColIdx, RowIdx: Integer;
-  PnlWidth, PnlHeight, ImgWidth, ImgHeight: Single;
+  ImgIdx, ImgCnt, ColCnt, RowCnt, ColIdx, RowIdx: integer;
+  PnlWidth, PnlHeight, ImgWidth, ImgHeight: single;
   ThisPos, ThisScale, ThisSz: TPointF;
-  Landscape: Boolean;
 begin
   if ATabPnl = nil then
     Exit;
@@ -498,7 +500,6 @@ begin
     PnlWidth := FImagesPanel.Width;
     PnlHeight := FImagesPanel.Height;
     ThisScale := FImagesPanel.Scale.Point;
-    Landscape := PnlWidth > PnlHeight;
 
     if FCurrentPrime <> nil then
     begin
@@ -516,133 +517,10 @@ begin
     end
     Else
     Begin
-      case ImgCnt of
-        1:
-          Begin
-            ColCnt := 1;
-            RowCnt := 1;
-          End;
-        2:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 2;
-              RowCnt := 1;
-            End
-            else
-            Begin
-              ColCnt := 1;
-              RowCnt := 2;
-            End;
-          End;
-        3 .. 4:
-          Begin
-            Begin
-              ColCnt := 2;
-              RowCnt := 2;
-            End
-          End;
-        5 .. 6:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 2;
-              RowCnt := 3;
-            End
-            else
-            Begin
-              ColCnt := 3;
-              RowCnt := 2;
-            End;
-          End;
-        7 .. 12:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 3;
-              RowCnt := 4;
-            End
-            else
-            Begin
-              ColCnt := 4;
-              RowCnt := 3;
-            End;
-          End;
-        13 .. 15:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 3;
-              RowCnt := 5;
-            End
-            else
-            Begin
-              ColCnt := 5;
-              RowCnt := 3;
-            End;
-          End;
-        16 .. 24:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 4;
-              RowCnt := 6;
-            End
-            else
-            Begin
-              ColCnt := 6;
-              RowCnt := 4;
-            End;
-          End;
-        25 .. 30:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 5;
-              RowCnt := 6;
-            End
-            else
-            Begin
-              ColCnt := 6;
-              RowCnt := 5;
-            End;
-          End;
-        31 .. 36:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 6;
-              RowCnt := 6;
-            End
-            else
-            Begin
-              ColCnt := 6;
-              RowCnt := 6;
-            End;
-          End;
-        37.. 49:
-          Begin
-              ColCnt := 7;
-              RowCnt := 7;
-          End;
-      Else
-        Begin
-          if Landscape then
-          Begin
-            ColCnt := 10;
-            RowCnt := 8;
-          End
-          else
-          Begin
-            ColCnt := 8;
-            RowCnt := 10;
-          End;
-        End;
-      end;
+      SetRowsCols(PnlWidth, PnlHeight, ColCnt, RowCnt);
       ImgWidth := PnlWidth / ColCnt;
       ImgHeight := PnlHeight / RowCnt;
       ThisPos := TPointF.Create(0, 0);
-
       ImgIdx := 0;
       ColIdx := 0;
       RowIdx := 0;
@@ -674,8 +552,297 @@ begin
   end;
 end;
 
+procedure TImageCntrlManager.SetRowsCols(APnlWidth, APnlHeight: single;
+  Out AColCnt, ARowCnt: integer);
+
+{ sub } Function NextAspect(AIdx: integer; Out AValid: Boolean): single;
+  Var
+    ThisImage: TImageControl;
+  Begin
+    Result := 0;
+    AValid := false;
+    if (FImageArray[AIdx] is TImageControl) then
+    Begin
+      ThisImage := TImageControl(FImageArray[AIdx]);
+      if ThisImage.Bitmap <> nil then
+        if ThisImage.Bitmap.Width > 0 then
+        Begin
+          Result := ThisImage.Bitmap.Width / ThisImage.Bitmap.Height;
+          AValid := true;
+        End;
+    End;
+  End;
+
+Var
+  PnlAspectRatio, AverageAspectRatio, SqRtAverageAspectRatio, StdzPnlWidth,
+    StdzPnlHeight, StdzImageWidth, StdzImageHeight: single;
+  IDX, Images, ValidImages: integer;
+  ValidImage: Boolean;
+Begin
+  IDX := 0;
+  ValidImages := 0;
+  AverageAspectRatio := 0;
+  Images := Length(FImageArray);
+  While IDX < Images do
+  Begin
+    AverageAspectRatio := AverageAspectRatio + NextAspect(IDX, ValidImage);
+    if ValidImage then
+      inc(ValidImages);
+    inc(IDX);
+  End;
+  if ValidImages = 0 then
+    AverageAspectRatio := 1
+  else
+    AverageAspectRatio := AverageAspectRatio / ValidImages;
+
+  if not SameValue(1, AverageAspectRatio) then
+    if SameValue(AverageAspectRatio, cTstAspect, 0.00001) then
+      inc(ARowCnt)
+    else
+      inc(AColCnt);
+
+  SqRtAverageAspectRatio := SqRt(AverageAspectRatio);
+  StdzImageWidth := SqRtAverageAspectRatio;
+  StdzImageHeight := 1 / SqRtAverageAspectRatio;
+
+  if SameValue(StdzImageWidth * StdzImageHeight, 1, 0.00001) then
+    inc(ARowCnt) //All OK
+  else
+    inc(AColCnt); //Problem
+
+  if SameValue(StdzImageWidth / StdzImageHeight, AverageAspectRatio, 0.00001)
+  then
+    inc(ARowCnt) //All OK
+  else
+    inc(AColCnt); //Problem
+
+  PnlAspectRatio := APnlWidth / APnlHeight;
+  StdzPnlWidth := SqRt(Images * PnlAspectRatio);
+  StdzPnlHeight := StdzPnlWidth / PnlAspectRatio;
+   StdzPnlHeight := SqRt(Images/PnlAspectRatio);
+
+  if SameValue(StdzImageWidth * StdzImageHeight, 1, 0.00001) then
+    inc(ARowCnt) //All OK
+  else
+    inc(AColCnt); //Problem
+
+  if SameValue(StdzPnlWidth * StdzPnlHeight, Images, 0.00001) then
+    inc(ARowCnt) //All OK
+  else
+    inc(AColCnt); //Problem
+
+//   AColCnt := Trunc(StdzPnlWidth / StdzImageWidth);
+//   ARowCnt := Trunc(StdzPnlHeight / StdzImageHeight);
+  AColCnt := Round(StdzPnlWidth / StdzImageWidth);
+  ARowCnt := Round(StdzPnlHeight / StdzImageHeight);
+
+  if AColCnt <= 1 then
+  Begin
+    AColCnt := 1;
+    ARowCnt := Images;
+  end;
+  if ARowCnt <= 1 then
+  Begin
+    ARowCnt := 1;
+    AColCnt := Images;
+  end;
+
+  ValidImages := AColCnt * ARowCnt;
+  While ValidImages < Images do
+    Begin
+     if AColCnt < ARowCnt then
+       Begin
+         if (Images - ValidImages)<=AColCnt then
+           Inc(AColCnt)
+          else
+           Inc(ARowCnt);
+       end
+       else
+       Begin
+         if (Images - ValidImages)<=ARowCnt then
+           Inc(AColCnt)
+          else
+           Inc(ARowCnt);
+       End;
+     ValidImages := AColCnt * ARowCnt;
+    end;
+
+    if ValidImages >= (Images + ARowCnt) then
+      Dec (AColCnt)
+    else
+      if ValidImages >= (Images + AColCnt) then
+         Dec (ARowCnt);
+
+  ValidImages := AColCnt * ARowCnt;
+  if ValidImages < Images then
+     ISIndyUtilsException(Self,'ValidImages < Images');
+  (*
+    Var
+    Landscape: Boolean;
+    ImgCnt: integer;
+    begin
+    Landscape := APnlWidth > APnlHeight;
+    ImgCnt := Length(FImageArray);
+    case ImgCnt of
+    1:
+    Begin
+    AColCnt := 1;
+    ARowCnt := 1;
+    End;
+    2:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 2;
+    ARowCnt := 1;
+    End
+    else
+    Begin
+    AColCnt := 1;
+    ARowCnt := 2;
+    End;
+    End;
+    3 .. 4:
+    Begin
+    Begin
+    AColCnt := 2;
+    ARowCnt := 2;
+    End
+    End;
+    5 .. 6:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 3;
+    ARowCnt := 2;
+    End
+    else
+    Begin
+    AColCnt := 2;
+    ARowCnt := 3;
+    End;
+    End;
+    7 .. 9:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 3;
+    ARowCnt := 3;
+    End
+    else
+    Begin
+    AColCnt := 3;
+    ARowCnt := 3;
+    End;
+    End;
+    10 .. 12:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 4;
+    ARowCnt := 3;
+    End
+    else
+    Begin
+    AColCnt := 3;
+    ARowCnt := 4;
+    End;
+    End;
+    13 .. 15:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 5;
+    ARowCnt := 3;
+    End
+    else
+    Begin
+    AColCnt := 3;
+    ARowCnt := 5;
+    End;
+    End;
+    16:
+    Begin
+    AColCnt := 4;
+    ARowCnt := 4;
+    End;
+    17 .. 20:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 5;
+    ARowCnt := 4;
+    End
+    else
+    Begin
+    AColCnt := 4;
+    ARowCnt := 5;
+    End;
+    End;
+
+    21 .. 24:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 6;
+    ARowCnt := 4;
+    End
+    else
+    Begin
+    AColCnt := 4;
+    ARowCnt := 6;
+    End;
+    End;
+    25 .. 30:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 6;
+    ARowCnt := 5;
+    End
+    else
+    Begin
+    AColCnt := 5;
+    ARowCnt := 6;
+    End;
+    End;
+    31 .. 36:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 6;
+    ARowCnt := 6;
+    End
+    else
+    Begin
+    AColCnt := 6;
+    ARowCnt := 6;
+    End;
+    End;
+    37 .. 49:
+    Begin
+    AColCnt := 7;
+    ARowCnt := 7;
+    End;
+    Else
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 10;
+    ARowCnt := 8;
+    End
+    else
+    Begin
+    AColCnt := 8;
+    ARowCnt := 10;
+    End;
+    End;
+    end;
+  *)
+end;
+
 { TVideoChnlLink }
-procedure TVideoChnlLink.BlankInactiveChannel(AInLastNoMins: Integer);
+procedure TVideoChnlLink.BlankInactiveChannel(AInLastNoMins: integer);
 begin
   try
     if VideoIsActive(AInLastNoMins) then
@@ -707,7 +874,7 @@ begin
       ISIndyUtilsException(Self, 'ChannelClosing No Ref');
 end;
 
-constructor TVideoChnlLink.Create(AHost: String; APort: Integer;
+constructor TVideoChnlLink.Create(AHost: String; APort: integer;
   ALinkRef: String; AImage: TImageControl);
 begin
   Try
@@ -728,7 +895,7 @@ begin
   inherited;
 end;
 
-procedure TVideoChnlLink.DisConnectInactiveChannel(AInLastNoMins: Integer);
+procedure TVideoChnlLink.DisConnectInactiveChannel(AInLastNoMins: integer);
 begin
   try
     if VideoIsActive(AInLastNoMins) then
@@ -833,7 +1000,7 @@ begin
   Result := FVideoComs;
 end;
 
-function TVideoChnlLink.VideoIsActive(AInLastNoMins: Integer): Boolean;
+function TVideoChnlLink.VideoIsActive(AInLastNoMins: integer): Boolean;
 Var
   Recent: Boolean;
 begin

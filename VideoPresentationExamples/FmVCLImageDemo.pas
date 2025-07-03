@@ -55,7 +55,7 @@ begin
     for I := 0 to NoToAdd - 1 do
     Begin
       try
-        ImageToAdd := Random(ImageCount + 1);
+        ImageToAdd := Random(ImageCount);
         if (I + PosToAdd) < Length(FImageManager.ImageControlArray) then
           FImageManager.ImageControl(I + PosToAdd).BitMap :=
             ImageCollection1.GetBitmap(ImageToAdd, 1000, 1000)

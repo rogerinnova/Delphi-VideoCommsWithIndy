@@ -12,13 +12,13 @@ interface
 uses
 {$IFDEF FPC}
   SysUtils, Types, UITypes, Classes,
-  Variants,
+  Variants, Math,
   Controls,
   Graphics,
   ExtCtrls,
 {$ELSE}
   System.SysUtils, System.Types, System.UITypes, System.Classes,
-  System.Variants,
+  System.Variants, System.Math,
   VCL.Controls,
   VCL.Graphics,
   VCL.ExtCtrls,
@@ -51,18 +51,22 @@ Type
     Function DefaultBitMap: TBitmap;
     Procedure DoOnPanelResize(Sender: TObject);
     Procedure ImageClicked(APosObj: TImagePosObjVCL);
+    Procedure SetRowsCols(APnlWidth, APnlHeight: single;
+      Out AColCnt, ARowCnt: integer);
   public
     Constructor Create(ATabPnl: TPanel; ANoOfChnls: Integer);
     Destructor Destroy; override;
     Procedure SetImagePanels(ATabPnl: TPanel);
     Procedure InsertImagesAt(ATabPnl: TPanel; AAddAt, ANoToAdd: Integer);
     Procedure GrowImageLists(ATabPnl: TPanel; ANoOfMangedImages: Integer);
-    Procedure DisConnectInactiveImageChannels(AListOfCurrentRx: TStrings; AMinutesInActive:Integer);
-    Procedure BlankInactiveImageChannels(AListOfCurrentRx: TStrings; AMinutesInActive:Integer);
+    Procedure DisConnectInactiveImageChannels(AListOfCurrentRx: TStrings;
+      AMinutesInActive: Integer);
+    Procedure BlankInactiveImageChannels(AListOfCurrentRx: TStrings;
+      AMinutesInActive: Integer);
     Function ImageControl(AIndx: Integer): TImageControl;
     Function ImageControlArray: TImageArray;
-    Function FindNullImage(AListOfCurrentRx: TStrings; ANoImagesReservedExternalToList: Integer)
-      : TImageControl;
+    Function FindNullImage(AListOfCurrentRx: TStrings;
+      ANoImagesReservedExternalToList: Integer): TImageControl;
   end;
 
   TImagePosObjVCL = class(TObject)
@@ -74,8 +78,8 @@ Type
     FImage: TImageControl;
     FPresetBmp: TBitmap;
     FParentPanel: TPanel;
-    FSz, FPos { , FScale } : TPointF;
-    Procedure ReSetValues(AThisIndx: Integer; ASz, APos, AScale: TPointF);
+    FSz, FPos : TPointF;
+    Procedure ReSetValues(AThisIndx: Integer; ASz, APos : TPointF);
   end;
 
   TVideoChnlLinkVCL = class(TObject)
@@ -107,6 +111,7 @@ Type
 
 Var
   GblDefaultBitMap: TBitmap = nil;
+  cTstAspect: single = 0.5;
 
 implementation
 
@@ -123,13 +128,15 @@ end;
 procedure TImageMngrVCL.BlankInactiveImageChannels(AListOfCurrentRx: TStrings;
   AMinutesInActive: Integer);
 Var
-  IDX:Integer;
+  IDX: Integer;
 begin
-  if AListOfCurrentRx=nil then Exit;
-  if AListOfCurrentRx.Count>0 then
-    for Idx := 0 to AListOfCurrentRx.Count-1 do
-      if AListOfCurrentRx.Objects[Idx] is TVideoChnlLinkVCL then
-        TVideoChnlLinkVCL(AListOfCurrentRx.Objects[Idx]).BlankInactiveChannel(AMinutesInActive);
+  if AListOfCurrentRx = nil then
+    Exit;
+  if AListOfCurrentRx.Count > 0 then
+    for IDX := 0 to AListOfCurrentRx.Count - 1 do
+      if AListOfCurrentRx.Objects[IDX] is TVideoChnlLinkVCL then
+        TVideoChnlLinkVCL(AListOfCurrentRx.Objects[IDX])
+          .BlankInactiveChannel(AMinutesInActive);
 end;
 
 constructor TImageMngrVCL.Create(ATabPnl: TPanel; ANoOfChnls: Integer);
@@ -168,16 +175,18 @@ begin
   inherited;
 end;
 
-procedure TImageMngrVCL.DisConnectInactiveImageChannels(AListOfCurrentRx: TStrings;
-  AMinutesInActive: Integer);
+procedure TImageMngrVCL.DisConnectInactiveImageChannels(AListOfCurrentRx
+  : TStrings; AMinutesInActive: Integer);
 Var
-  IDX:Integer;
+  IDX: Integer;
 begin
-  if AListOfCurrentRx=nil then Exit;
-  if AListOfCurrentRx.Count>0 then
-    for Idx := 0 to AListOfCurrentRx.Count-1 do
-      if AListOfCurrentRx.Objects[Idx] is TVideoChnlLinkVCL then
-        TVideoChnlLinkVCL(AListOfCurrentRx.Objects[Idx]).DisConnectInactiveChannel(AMinutesInActive);
+  if AListOfCurrentRx = nil then
+    Exit;
+  if AListOfCurrentRx.Count > 0 then
+    for IDX := 0 to AListOfCurrentRx.Count - 1 do
+      if AListOfCurrentRx.Objects[IDX] is TVideoChnlLinkVCL then
+        TVideoChnlLinkVCL(AListOfCurrentRx.Objects[IDX])
+          .DisConnectInactiveChannel(AMinutesInActive);
 end;
 
 procedure TImageMngrVCL.DoOnPanelResize(Sender: TObject);
@@ -189,28 +198,28 @@ end;
 function TImageMngrVCL.FindNullImage(AListOfCurrentRx: TStrings;
   ANoImagesReservedExternalToList: Integer): TImageControl;
 Var
-  idx, NextManual: Integer;
+  IDX, NextManual: Integer;
   LImage, TstImage: TObject;
 begin
   NextManual := ANoImagesReservedExternalToList;
   Result := nil;
   while (Result = nil) and (NextManual < Length(FImageArray)) do
   Begin
-    idx := 0;
+    IDX := 0;
     TstImage := ImageControl(NextManual);
-    While idx < AListOfCurrentRx.Count - 1 do
+    While IDX < AListOfCurrentRx.Count - 1 do
     begin
-      if AListOfCurrentRx.Objects[idx] is TVideoChnlLinkVCL then
-        with (AListOfCurrentRx.Objects[idx] as TVideoChnlLinkVCL) do
+      if AListOfCurrentRx.Objects[IDX] is TVideoChnlLinkVCL then
+        with (AListOfCurrentRx.Objects[IDX] as TVideoChnlLinkVCL) do
         Begin
           TstImage := FImage;
           if (TstImage <> nil) then
             if TstImage = LImage then
-              idx := AListOfCurrentRx.Count + 3;
+              IDX := AListOfCurrentRx.Count + 3;
         End;
-      inc(idx);
+      inc(IDX);
     end;
-    if idx = AListOfCurrentRx.Count then // was not found
+    if IDX = AListOfCurrentRx.Count then // was not found
       Result := FImageArray[NextManual] as TImageControl;
 
     if Result = nil then
@@ -229,7 +238,7 @@ procedure TImageMngrVCL.GrowImageLists(ATabPnl: TPanel;
 Var
   NewImage: TImageControl;
   CurrentLength: Integer;
-  idx: Integer;
+  IDX: Integer;
 begin
   if ATabPnl <> FTabPnl then
   Begin
@@ -262,8 +271,8 @@ begin
         FImageArray[CurrentLength] := NewImage;
         inc(CurrentLength);
       End;
-      for idx := 0 to CurrentLength - 1 do
-        FPArray[idx].ReSetValues(idx, TPointFZero, TPointFZero, TPointFZero);
+      for IDX := 0 to CurrentLength - 1 do
+        FPArray[IDX].ReSetValues(IDX, TPointFZero, TPointFZero);
     End;
     SetImagePanels(FTabPnl);
   except
@@ -329,40 +338,35 @@ begin
   End;
 
   for I := 0 to (CurrentLength - 1) do
-    FPArray[I].ReSetValues(I, TPointFZero, TPointFZero, TPointFZero);
+    FPArray[I].ReSetValues(I, TPointFZero, TPointFZero);
   SetImagePanels(FTabPnl);
 End;
 
 procedure TImageMngrVCL.SetImagePanels(ATabPnl: TPanel);
 Var
-  ImgIdx, ImgCnt, ColCnt, RowCnt, ColIdx, RowIdx: Integer;
-  PnlWidth, PnlHeight, ImgWidth, ImgHeight: Single;
-  ThisPos, ThisScale, ThisSz: TPointF;
-  Landscape: Boolean;
+  ImgIdx, ImgCnt, ColCnt, RowCnt, ColIdx, RowIdx: integer;
+  PnlWidth, PnlHeight, ImgWidth, ImgHeight: single;
+  ThisPos, ThisSz: TPointF;
 begin
   if ATabPnl = nil then
     Exit;
   if ATabPnl <> FTabPnl then
   Begin
-    ISIndyUtilsException(Self, 'ATab<>FTab SetImagePanels');
+    ISIndyUtilsException(Self, 'ATab<>FTab GrowImageLists');
     Exit;
   End;
   try
     ImgCnt := Length(FImageArray);
     if Length(FPArray) <> ImgCnt then
-      ISIndyUtilsException(Self, 'Bad # of images SetImagePanels');
+      ISIndyUtilsException(Self, 'Bad # of images');
     For ImgIdx := 0 to ImgCnt - 1 do
-      FPArray[ImgIdx].ReSetValues(ImgIdx, TPointFZero, TPointFZero,
-        TPointFZero);
+      FPArray[ImgIdx].ReSetValues(ImgIdx, TPointF.Zero, TPointF.Zero);
 
     if ImgCnt < 1 then
       Exit;
 
     PnlWidth := FTabPnl.Width;
     PnlHeight := FTabPnl.Height;
-    // ThisScale := FTabPnl.Scale.Point;
-    Landscape := PnlWidth > PnlHeight;
-
     if FCurrentPrime <> nil then
     begin
       ImgIdx := 0;
@@ -371,137 +375,18 @@ begin
       while ImgIdx < ImgCnt do
       Begin
         if FCurrentPrime = FPArray[ImgIdx] then
-          FPArray[ImgIdx].ReSetValues(ImgIdx, ThisSz, ThisPos, ThisScale)
+          FPArray[ImgIdx].ReSetValues(ImgIdx, ThisSz, ThisPos)
         else
-          FPArray[ImgIdx].ReSetValues(ImgIdx, ThisPos, ThisPos, TPointFZero);
+          FPArray[ImgIdx].ReSetValues(ImgIdx, ThisPos, ThisPos);
         inc(ImgIdx);
       End;
     end
     Else
     Begin
-      case ImgCnt of
-        1:
-          Begin
-            ColCnt := 1;
-            RowCnt := 1;
-          End;
-        2:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 2;
-              RowCnt := 1;
-            End
-            else
-            Begin
-              ColCnt := 1;
-              RowCnt := 2;
-            End;
-          End;
-        3 .. 4:
-          Begin
-
-            Begin
-              ColCnt := 2;
-              RowCnt := 2;
-            End
-          End;
-        5 .. 6:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 2;
-              RowCnt := 3;
-            End
-            else
-            Begin
-              ColCnt := 3;
-              RowCnt := 2;
-            End;
-          End;
-        7 .. 12:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 3;
-              RowCnt := 4;
-            End
-            else
-            Begin
-              ColCnt := 4;
-              RowCnt := 3;
-            End;
-          End;
-        13 .. 15:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 3;
-              RowCnt := 5;
-            End
-            else
-            Begin
-              ColCnt := 5;
-              RowCnt := 3;
-            End;
-          End;
-        16 .. 24:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 4;
-              RowCnt := 6;
-            End
-            else
-            Begin
-              ColCnt := 6;
-              RowCnt := 4;
-            End;
-          End;
-        25 .. 30:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 5;
-              RowCnt := 6;
-            End
-            else
-            Begin
-              ColCnt := 6;
-              RowCnt := 5;
-            End;
-          End;
-        31 .. 36:
-          Begin
-            if Landscape then
-            Begin
-              ColCnt := 6;
-              RowCnt := 6;
-            End
-            else
-            Begin
-              ColCnt := 6;
-              RowCnt := 6;
-            End;
-          End;
-      Else
-        Begin
-          if Landscape then
-          Begin
-            ColCnt := 7;
-            RowCnt := 8;
-          End
-          else
-          Begin
-            ColCnt := 7;
-            RowCnt := 8;
-          End;
-        End;
-      end;
+      SetRowsCols(PnlWidth, PnlHeight, ColCnt, RowCnt);
       ImgWidth := PnlWidth / ColCnt;
       ImgHeight := PnlHeight / RowCnt;
       ThisPos := TPointF.Create(0, 0);
-
       ImgIdx := 0;
       ColIdx := 0;
       RowIdx := 0;
@@ -512,7 +397,7 @@ begin
         Begin
           if ImgIdx < ImgCnt then
           Begin
-            FPArray[ImgIdx].ReSetValues(ImgIdx, ThisSz, ThisPos, ThisScale);
+            FPArray[ImgIdx].ReSetValues(ImgIdx, ThisSz, ThisPos);
             inc(ImgIdx);
           End
           Else
@@ -533,110 +418,296 @@ begin
   end;
 end;
 
-{ TImagePosObj }
+procedure TImageMngrVCL.SetRowsCols(APnlWidth, APnlHeight: single; out AColCnt,
+  ARowCnt: integer);
 
-(*
-  class procedure TImagePosObj.GrowImageLists(ATab: TTabItem;
-  var AImageArray: TImageArray; var APArray: TImagePosObjArray;
-  ANoOfChnls: Integer);
+{ sub } Function NextAspect(AIdx: integer; Out AValid: Boolean): single;
   Var
-  CurrentLength: Integer;
-  Idx: Integer;
-  begin
-  try
-  CurrentLength := Length(AImageArray);
-  if CurrentLength < ANoOfChnls then
+    ThisImage: TImageControl;
   Begin
-  Setlength(AImageArray, ANoOfChnls);
-  Setlength(APArray, ANoOfChnls);
-  while CurrentLength < ANoOfChnls do
-  Begin
-  AImageArray[CurrentLength] :=
-  TImageControl.Create(nil { self //I will Free Images } );
-  APArray[CurrentLength] := TImagePosObj.Create;
-  inc(CurrentLength);
+    Result := 0;
+    AValid := false;
+    if (FImageArray[AIdx] is TImageControl) then
+    Begin
+      ThisImage := TImageControl(FImageArray[AIdx]);
+      if ThisImage.Bitmap <> nil then
+        if ThisImage.Bitmap.Width > 0 then
+        Begin
+          Result := ThisImage.Bitmap.Width / ThisImage.Bitmap.Height;
+          AValid := true;
+        End;
+    End;
   End;
-  for Idx := 0 to CurrentLength - 1 do
-  APArray[Idx].SetAllValues(Idx, ATab, AImageArray, APArray);
+
+Var
+  PnlAspectRatio, AverageAspectRatio, SqRtAverageAspectRatio, StdzPnlWidth,
+    StdzPnlHeight, StdzImageWidth, StdzImageHeight: single;
+  IDX, Images, ValidImages: integer;
+  ValidImage: Boolean;
+Begin
+  IDX := 0;
+  ValidImages := 0;
+  AverageAspectRatio := 0;
+  Images := Length(FImageArray);
+  While IDX < Images do
+  Begin
+    AverageAspectRatio := AverageAspectRatio + NextAspect(IDX, ValidImage);
+    if ValidImage then
+      inc(ValidImages);
+    inc(IDX);
   End;
-  // if ShortSliderForm.FNoAutoImgs <> ANoOfChnls then
-  // ShortSliderForm.ReviewImages;
-  except
-  On E: Exception do
-  ISIndyUtilsException('Class Proc ', E, 'TImagePosObj.GrowImageLists');
-  end;
-  end;
-
-  class procedure TImagePosObj.SetImagePanels(ATab: TTabItem;
-  ARxImageArray: TImageArray; APArray: TImagePosObjArray);
-  Var
-  Idx, Img, ColCnt, RowCnt, ColIdx, RowIdx: Integer;
-  PnlWidth, PnlHeight, TabWidth, TabHeight: Single;
-  ThisPos, ThisScale: TPointF;
-  Panel: TPanel;
-  Landscape: Boolean;
-  begin
-  try
-  Img := Length(ARxImageArray);
-  if Length(APArray) <> Img then
-  ISIndyUtilsException('Class TImagePosObj', 'Bad # of images');
-  For Idx := 0 to Img - 1 do
-  APArray[Idx].ReSetValues(Idx, TPointF.Zero, TPointF.Zero, TPointF.Zero);
-
-  if Img < 1 then
-  Exit;
-
-  Panel := APArray[0].FImagesPanel;
-  PnlWidth := Panel.Width;
-  PnlHeight := Panel.Height;
-  Landscape := PnlWidth > PnlHeight;
-
-  case Img of
-  1:
-  Begin
-  ColCnt := 1;
-  RowCnt := 1;
-  End;
-  2:
-  Begin
-  if Landscape then
-  Begin
-  ColCnt := 2;
-  RowCnt := 1;
-  End
+  if ValidImages = 0 then
+    AverageAspectRatio := 1
   else
-  Begin
-  ColCnt := 1;
-  RowCnt := 2;
-  End;
-  End;
-  3 .. 4:
-  Begin
-  Begin
-  ColCnt := 2;
-  RowCnt := 2;
-  End
-  End;
-  5 .. 6:
-  Begin
-  if Landscape then
-  Begin
-  ColCnt := 2;
-  RowCnt := 2;
-  End
+    AverageAspectRatio := AverageAspectRatio / ValidImages;
+
+  if not SameValue(1, AverageAspectRatio) then
+    if SameValue(AverageAspectRatio, cTstAspect, 0.00001) then
+      inc(ARowCnt)
+    else
+      inc(AColCnt);
+
+  SqRtAverageAspectRatio := SqRt(AverageAspectRatio);
+  StdzImageWidth := SqRtAverageAspectRatio;
+  StdzImageHeight := 1 / SqRtAverageAspectRatio;
+
+  if SameValue(StdzImageWidth * StdzImageHeight, 1, 0.00001) then
+    inc(ARowCnt) //All OK
   else
+    inc(AColCnt); //Problem
+
+  if SameValue(StdzImageWidth / StdzImageHeight, AverageAspectRatio, 0.00001)
+  then
+    inc(ARowCnt) //All OK
+  else
+    inc(AColCnt); //Problem
+
+  PnlAspectRatio := APnlWidth / APnlHeight;
+  StdzPnlWidth := SqRt(Images * PnlAspectRatio);
+  StdzPnlHeight := StdzPnlWidth / PnlAspectRatio;
+   StdzPnlHeight := SqRt(Images/PnlAspectRatio);
+
+  if SameValue(StdzImageWidth * StdzImageHeight, 1, 0.00001) then
+    inc(ARowCnt) //All OK
+  else
+    inc(AColCnt); //Problem
+
+  if SameValue(StdzPnlWidth * StdzPnlHeight, Images, 0.00001) then
+    inc(ARowCnt) //All OK
+  else
+    inc(AColCnt); //Problem
+
+//   AColCnt := Trunc(StdzPnlWidth / StdzImageWidth);
+//   ARowCnt := Trunc(StdzPnlHeight / StdzImageHeight);
+  AColCnt := Round(StdzPnlWidth / StdzImageWidth);
+  ARowCnt := Round(StdzPnlHeight / StdzImageHeight);
+
+  if AColCnt <= 1 then
   Begin
-  ColCnt := 1;
-  RowCnt := 2;
-  End;
-  End;
+    AColCnt := 1;
+    ARowCnt := Images;
   end;
-  Except
-  On E: Exception do
-  ISIndyUtilsException('Class TImagePosObj', E, 'Set Image Panels');
+  if ARowCnt <= 1 then
+  Begin
+    ARowCnt := 1;
+    AColCnt := Images;
   end;
-  end;
-*)
+
+  ValidImages := AColCnt * ARowCnt;
+  While ValidImages < Images do
+    Begin
+     if AColCnt < ARowCnt then
+       Begin
+         if (Images - ValidImages)<=AColCnt then
+           Inc(AColCnt)
+          else
+           Inc(ARowCnt);
+       end
+       else
+       Begin
+         if (Images - ValidImages)<=ARowCnt then
+           Inc(AColCnt)
+          else
+           Inc(ARowCnt);
+       End;
+     ValidImages := AColCnt * ARowCnt;
+    end;
+
+    if ValidImages >= (Images + ARowCnt) then
+      Dec (AColCnt)
+    else
+      if ValidImages >= (Images + AColCnt) then
+         Dec (ARowCnt);
+
+  ValidImages := AColCnt * ARowCnt;
+  if ValidImages < Images then
+     ISIndyUtilsException(Self,'ValidImages < Images');
+  (*
+    Var
+    Landscape: Boolean;
+    ImgCnt: integer;
+    begin
+    Landscape := APnlWidth > APnlHeight;
+    ImgCnt := Length(FImageArray);
+    case ImgCnt of
+    1:
+    Begin
+    AColCnt := 1;
+    ARowCnt := 1;
+    End;
+    2:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 2;
+    ARowCnt := 1;
+    End
+    else
+    Begin
+    AColCnt := 1;
+    ARowCnt := 2;
+    End;
+    End;
+    3 .. 4:
+    Begin
+    Begin
+    AColCnt := 2;
+    ARowCnt := 2;
+    End
+    End;
+    5 .. 6:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 3;
+    ARowCnt := 2;
+    End
+    else
+    Begin
+    AColCnt := 2;
+    ARowCnt := 3;
+    End;
+    End;
+    7 .. 9:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 3;
+    ARowCnt := 3;
+    End
+    else
+    Begin
+    AColCnt := 3;
+    ARowCnt := 3;
+    End;
+    End;
+    10 .. 12:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 4;
+    ARowCnt := 3;
+    End
+    else
+    Begin
+    AColCnt := 3;
+    ARowCnt := 4;
+    End;
+    End;
+    13 .. 15:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 5;
+    ARowCnt := 3;
+    End
+    else
+    Begin
+    AColCnt := 3;
+    ARowCnt := 5;
+    End;
+    End;
+    16:
+    Begin
+    AColCnt := 4;
+    ARowCnt := 4;
+    End;
+    17 .. 20:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 5;
+    ARowCnt := 4;
+    End
+    else
+    Begin
+    AColCnt := 4;
+    ARowCnt := 5;
+    End;
+    End;
+
+    21 .. 24:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 6;
+    ARowCnt := 4;
+    End
+    else
+    Begin
+    AColCnt := 4;
+    ARowCnt := 6;
+    End;
+    End;
+    25 .. 30:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 6;
+    ARowCnt := 5;
+    End
+    else
+    Begin
+    AColCnt := 5;
+    ARowCnt := 6;
+    End;
+    End;
+    31 .. 36:
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 6;
+    ARowCnt := 6;
+    End
+    else
+    Begin
+    AColCnt := 6;
+    ARowCnt := 6;
+    End;
+    End;
+    37 .. 49:
+    Begin
+    AColCnt := 7;
+    ARowCnt := 7;
+    End;
+    Else
+    Begin
+    if Landscape then
+    Begin
+    AColCnt := 10;
+    ARowCnt := 8;
+    End
+    else
+    Begin
+    AColCnt := 8;
+    ARowCnt := 10;
+    End;
+    End;
+    end;
+  *)
+end;
+
+{ TImagePosObjVCL }
 
 constructor TImagePosObjVCL.Create(AImageCtrlManager: TImageMngrVCL);
 begin
@@ -661,7 +732,7 @@ begin
 end;
 
 procedure TImagePosObjVCL.ReSetValues(AThisIndx: Integer;
-  ASz, APos, AScale: TPointF);
+  ASz, APos: TPointF);
 
 begin
   if (Length(FImagelManager.FImageArray) <= AThisIndx) or
@@ -706,7 +777,6 @@ end;
 
 { TVideoChnlLink }
 
-
 procedure TVideoChnlLinkVCL.BlankInactiveChannel(AInLastNoMins: Integer);
 begin
   try
@@ -714,10 +784,10 @@ begin
       Exit;
 
     if FVideoComs <> nil then
-      Begin
-        if Assigned(FVideoComs.OnInComingGraphic) then
+    Begin
+      if Assigned(FVideoComs.OnInComingGraphic) then
         FVideoComs.OnInComingGraphic(nil);
-      End;
+    End;
   Except
     On E: Exception do
     begin
@@ -768,7 +838,7 @@ begin
       Exit;
 
     if FVideoComs <> nil then
-      if FVideoComs.ChannelActiveWithGraphic(AInLastNoMins/24/60) then
+      if FVideoComs.ChannelActiveWithGraphic(AInLastNoMins / 24 / 60) then
         Exit
       else
       Begin

@@ -36,10 +36,12 @@ type
     ImgCamera: TImageControl;
     Timer1: TTimer;
     ImageList1: TImageList;
+    LblNoImages: TLabel;
     procedure FormCreate(Sender: TObject);
     procedure BtnAddImagesClick(Sender: TObject);
     procedure BtnAddCameraClick(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
+    procedure ImgCameraClick(Sender: TObject);
   private
     { Private declarations }
     FCameraOn: Boolean;
@@ -49,6 +51,7 @@ type
     Procedure GetNoToAdd(Out ANoToAdd, APosToAdd: Integer);
     Procedure Setup;
     Function MediaDevices: TDemoMediaCapture;
+    Function NewImageSize: TSizeF;
     Procedure SetCamera;
   public
     { Public declarations }
@@ -67,7 +70,8 @@ Var
   NoToAdd, PosToAdd, I, ImageCount: Integer;
   NewConnection: TVideoChnlLink;
 begin
-  SetCamera;
+  If Not FCameraOn then
+    SetCamera;
   If FMediaDevices = nil then
     Exit;
 
@@ -92,49 +96,45 @@ begin
       end;
     End;
   End;
-
+  LblNoImages.Text:=' Total Images = '+IntToStr(Length(FImageManager.ImageControlArray));
 End;
 
 procedure TTFormFMXImageDemo.BtnAddImagesClick(Sender: TObject);
 Var
   NoToAdd, PosToAdd, I, ImageToAdd, ImageCount: Integer;
   Size: TSizeF;
-  RandomRslt :Array of integer;
-{Interesting
-As I did not call Randomize I expected running the program with the same action
-would produce the same results (Images added) running Delphi 10.3 Sydney this
-was not the case A call to TPah Create before Application.Initialize does the
-Randomize.
+  RandomRslt: Array of Integer;
+  { Interesting
+    As I did not call Randomize I expected running the program with the same action
+    would produce the same results (Images added) running Delphi 10.3 Sydney this
+    was not the case A call to TPah Create before Application.Initialize does the
+    Randomize.
 
-class constructor TPath.Create;
-begin
-  Randomize;
-}
-
-
-
+    class constructor TPath.Create;
+    begin
+    Randomize;
+  }
 
 begin
-  NoToAdd:=2;
+  NoToAdd := 2;
   if FImageManager = nil then
     Setup
   else
   Begin
-    Size.Create(500, 500);
+    Size := NewImageSize;
     ImageCount := ImageList1.Count;
     GetNoToAdd(NoToAdd, PosToAdd);
-    SetLength(RandomRslt,NoToAdd+1);
+    SetLength(RandomRslt, NoToAdd + 1);
     FImageManager.InsertImagesAt(PnlImages, PosToAdd, NoToAdd);
     for I := 0 to NoToAdd - 1 do
     Begin
       try
         ImageToAdd := Random(ImageCount);
-        RandomRslt[i]:=ImageToAdd;
-        If ImageToAdd<1 Then
-           ImageToAdd:=0;
-        if ImageToAdd>ImageCount-1 then
-           ImageToAdd:=0;
-
+        RandomRslt[I] := ImageToAdd;
+        If ImageToAdd < 1 Then
+          ImageToAdd := 0;
+        if ImageToAdd > ImageCount - 1 then
+          ImageToAdd := 0;
 
         if (I + PosToAdd) < Length(FImageManager.ImageControlArray) then
           FImageManager.ImageControl(I + PosToAdd).BitMap :=
@@ -148,7 +148,8 @@ begin
       end;
     End;
   End;
-  SetLength(RandomRslt,NoToAdd+1);
+  SetLength(RandomRslt, NoToAdd + 1);
+  LblNoImages.Text:=' Total Images = '+IntToStr(Length(FImageManager.ImageControlArray));
 end;
 
 procedure TTFormFMXImageDemo.FormCreate(Sender: TObject);
@@ -164,6 +165,11 @@ begin
   LbEdtInsertPos.Text := IntToStr(APosToAdd);
 end;
 
+procedure TTFormFMXImageDemo.ImgCameraClick(Sender: TObject);
+begin
+  SetCamera;
+end;
+
 function TTFormFMXImageDemo.MediaDevices: TDemoMediaCapture;
 begin
   Try
@@ -171,7 +177,7 @@ begin
     Begin
       if CurrentMediaCapture <> nil then
         raise Exception.Create('LocalMediaCaptureDevices <> nil');
-      TDemoMediaCapture.Create(200, 200, False, True, True);
+      TDemoMediaCapture.Create(300, 250, False, True, True);
       FMediaDevices := CurrentMediaCapture as TDemoMediaCapture;
     end;
   Except
@@ -190,6 +196,11 @@ begin
   Result := FImageManager.ImageControl(AInsertAt);
 end;
 
+function TTFormFMXImageDemo.NewImageSize: TSizeF;
+begin
+  Result.Create(500, 500/cTstAspect);
+end;
+
 procedure TTFormFMXImageDemo.SetCamera;
 begin
   try
@@ -206,25 +217,26 @@ end;
 procedure TTFormFMXImageDemo.Setup;
 Var
   I: Integer;
-  Size: TSizeF;
+  Size:TPointF;
 begin
   if FImageManager <> nil then
     Exit;
-  Size.Create(500, 500);
-  NewImage(4).BitMap := ImageList1.BitMap(Size, 4);  //0..4>>5th Image
+  Size := NewImageSize;
+  NewImage(4).BitMap := ImageList1.BitMap(Size, 4); // 0..4>>5th Image
   for I := 0 to 4 do
     FImageManager.ImageControl(I).BitMap := ImageList1.BitMap(Size, I);
 end;
 
 procedure TTFormFMXImageDemo.Timer1Timer(Sender: TObject);
 begin
-  Timer1.Enabled:=false;
+  Timer1.Enabled := False;
   Try
-    if FMediaDevices<>nil then
-      if FImageManager<>nil then
-        FImageManager.BlankInactiveImageChannels(FMediaDevices.ListOfImageConnections,1);
+    if FMediaDevices <> nil then
+      if FImageManager <> nil then
+        FImageManager.BlankInactiveImageChannels
+          (FMediaDevices.ListOfImageConnections, 1);
   Finally
-     Timer1.Enabled:=True;
+    Timer1.Enabled := True;
   End;
 end;
 
@@ -265,7 +277,7 @@ begin
   if FListOfImageConnections = nil then
   Begin
     AddVideoCommsChannel(nil);
-    //to set FVideoComsChannels<>nil
+    // to set FVideoComsChannels<>nil
 
     FListOfImageConnections := TStringList.Create;
     FListOfImageConnections.Sorted := True;

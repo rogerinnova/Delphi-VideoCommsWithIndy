@@ -201,9 +201,9 @@ function TotalFileSizeKBytes(const ADirectoryName, AFilter: String;
 function DataMatch(ABuf1, ABuf2: Pointer; ASize1, ASize2: LongWord): Boolean;
 function FileDataMatch(const AFileNameOne, AFileNameTwo: AnsiString): Boolean;
 function NoOfFilesMatchingMask(AMask: AnsiString): Integer;
+function GetMyDocsFolder: String;
 
 {$IFNDEF FPC}
-function GetMyDocsFolder: String;
 {$IFDEF MSWINDOWS}
 function GetWindowsFontFolder: String;
 {$ENDIF}
@@ -2711,6 +2711,24 @@ begin
   Result := TPath.GetHomePath;
 {$ENDIF}
 end;
+function GetMyDocsFolder: String;
+begin
+  { X.Env.SearchPath - Returns the currently registered search path on the system.
+    X.Env.AppFilename - Returns the "app" name of the application.  On OS X this is the application package in which the exe resides.  On Windows, this is the name of the folder in which the exe resides.
+    X.Env.ExeFilename - Returns the actual filename of the running executable.
+    X.Env.AppFolder - Returns the folder path to the executable, stopping at the level of the application package on OSX.
+    X.Env.ExeFolder - Returns the full folder path to the executable.
+    X.Env.TempFolder - Returns a writable temp folder path that can be used by your application.
+    X.Env.HomeFolder - Returns the user's writable home folder.  On OS X this equates to /Users/username and on Windows,  C:\Users\username\AppData\Roaming or the appropriate path as set on the system.
+  }
+{$IFDEF MSWINDOWS}
+  Result := GetSpecialFolderLocation(CSIDL_PERSONAL);
+{$ELSE}
+  Result := TPath.GetDocumentsPath;
+{$ENDIF}
+end;
+
+
 {$IFNDEF FPC}
 function GetCommonAppsDataFolder: String;
 begin
@@ -2736,23 +2754,6 @@ begin
   Result := TPath.GetTempPath;
 {$ELSE}
   Result := GetWindowsTempFileDirectory;
-{$ENDIF}
-end;
-
-function GetMyDocsFolder: String;
-begin
-  { X.Env.SearchPath - Returns the currently registered search path on the system.
-    X.Env.AppFilename - Returns the "app" name of the application.  On OS X this is the application package in which the exe resides.  On Windows, this is the name of the folder in which the exe resides.
-    X.Env.ExeFilename - Returns the actual filename of the running executable.
-    X.Env.AppFolder - Returns the folder path to the executable, stopping at the level of the application package on OSX.
-    X.Env.ExeFolder - Returns the full folder path to the executable.
-    X.Env.TempFolder - Returns a writable temp folder path that can be used by your application.
-    X.Env.HomeFolder - Returns the user's writable home folder.  On OS X this equates to /Users/username and on Windows,  C:\Users\username\AppData\Roaming or the appropriate path as set on the system.
-  }
-{$IFDEF MSWINDOWS}
-  Result := GetSpecialFolderLocation(CSIDL_PERSONAL);
-{$ELSE}
-  Result := TPath.GetDocumentsPath;
 {$ENDIF}
 end;
 {$ENDIF}
