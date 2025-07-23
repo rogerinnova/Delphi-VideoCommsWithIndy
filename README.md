@@ -8,4 +8,4 @@ This requires some demonstration projects and perhaps more importantly documenta
 
 # Status
 
-Still early days some library files added and a first cut of the display demos.
+Still early days some library files added and a working version of two Image Display demos.

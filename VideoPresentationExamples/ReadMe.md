@@ -16,3 +16,8 @@ The individual TImageControls are referenced by an incoming channel to display t
 It is much easier to provide a location  (TPanel) on a form and create and manage a number of images within that panel. 
 
 TImageCntrlManager (FMX) and TImageMngrVCL (VCL) provide this functionality. The Manager will create and allocate a TImageControl on the panel and re-size and relocate all images to fit on he panel.
+## More Info
+[Notes on using Imagemanager Demos](https://innovasolutions.com.au/Docs/ADUGDelphi/Multi%20Video%20Channel%20Display.pdf)
+
+A Work in Progress [Help Info On Library Units](https://innovasolutions.com.au/Docs/CommsAndVideoDocumentation/)
+
