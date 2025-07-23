@@ -70,11 +70,15 @@ Var
   NoToAdd, PosToAdd, I, ImageCount: Integer;
   NewConnection: TVideoChnlLink;
 begin
+  if FImageManager = nil then
+  Begin
+    Setup;
+    Exit;
+  End;
   If Not FCameraOn then
     SetCamera;
   If FMediaDevices = nil then
     Exit;
-
   if FCameraOn then
   Begin
     ImageCount := ImageList1.Count;
@@ -96,7 +100,8 @@ begin
       end;
     End;
   End;
-  LblNoImages.Text:=' Total Images = '+IntToStr(Length(FImageManager.ImageControlArray));
+  LblNoImages.Text := ' Total Images = ' +
+    IntToStr(Length(FImageManager.ImageControlArray));
 End;
 
 procedure TTFormFMXImageDemo.BtnAddImagesClick(Sender: TObject);
@@ -149,7 +154,8 @@ begin
     End;
   End;
   SetLength(RandomRslt, NoToAdd + 1);
-  LblNoImages.Text:=' Total Images = '+IntToStr(Length(FImageManager.ImageControlArray));
+  LblNoImages.Text := ' Total Images = ' +
+    IntToStr(Length(FImageManager.ImageControlArray));
 end;
 
 procedure TTFormFMXImageDemo.FormCreate(Sender: TObject);
@@ -198,7 +204,7 @@ end;
 
 function TTFormFMXImageDemo.NewImageSize: TSizeF;
 begin
-  Result.Create(500, 500/cTstAspect);
+  Result.Create(500, 500 / cTstAspect);
 end;
 
 procedure TTFormFMXImageDemo.SetCamera;
@@ -217,7 +223,7 @@ end;
 procedure TTFormFMXImageDemo.Setup;
 Var
   I: Integer;
-  Size:TPointF;
+  Size: TPointF;
 begin
   if FImageManager <> nil then
     Exit;
