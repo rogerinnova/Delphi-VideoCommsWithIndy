@@ -645,7 +645,6 @@ Var
   //Handshake string
   //Changing This String Value will Restrict Access to
   //Applications with the same setting
-  cApplicationHandshakeCode:AnsiString ='Change This String Value to Restrict Access';
   // GCountOfConnections: integer; // Base Connections
   // GlobalCountOfComsObjectTypes: TStringlist;
   GlobalApplicationProcessMessages: Procedure of Object;
@@ -656,9 +655,12 @@ Var
 {$ENDIF}
   GlobalSelectDebugChn: TISIndyTCPFullDuplexClient = nil;
 {$IFDEF NEXTGEN}
+  cApplicationHandshakeCodeString :String = 'Change This String Value to Restrict Access';
+Function cApplicationHandshakeCode:AnsiString; inline; // ='Change This String Value to Restrict Access';
 function CTransactionStart: AnsiChar; inline; // = '<';
 function CTransactionEnd: AnsiChar; inline; // = '>';
 {$ELSE}
+  cApplicationHandshakeCode:AnsiString ='Change This String Value to Restrict Access';
   CTransactionStart: AnsiChar = '<';
   CTransactionEnd: AnsiChar = '>';
 {$ENDIF}
@@ -962,6 +964,11 @@ end;
 function CTransactionEnd: AnsiChar; inline; // = '>';
 begin
   Result := '>';
+end;
+
+Function cApplicationHandshakeCode:AnsiString; inline; // ='Change This String Value to Restrict Access';
+begin
+  Result:=cApplicationHandshakeCodeString;
 end;
 {$ENDIF}
 {$IFDEF NEXTGEN}

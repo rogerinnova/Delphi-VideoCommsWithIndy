@@ -74,7 +74,7 @@ begin
     SetExceptionLog(ALogFileName,AStartNewLogFile)
    Else
     SetExceptionLog(ExceptionLogName,AStartNewLogFile);
-  ISIndyUtilsException(CRLF, CRLF + CRLF + 'New Executeable');
+  ISIndyUtilsException(CRLF, CRLF + CRLF + 'New Executeable Instance');
   ISIndyUtilsException(AppName, FormatDateTime('dddd dd mmm  hh.nn:ss.zzz ',
     Now) + CRLF + CRLF);
   GblLogAllChlOpenClose := ARptTcpOpenClose;
@@ -85,11 +85,11 @@ begin
   GblRptIsCommsConnectionAttempts := ARptCommsConAttempts;
 {$ELSE}
   If ARptAutoChannels Or ARptCommsConAttempts then
-    ISIndyUtilsException('Log Start',
+    ISIndyUtilsException('Log Start'+crlf,
 //      'GblRptCheckAutoChannels and  GblReportConnectionAttempts Not Supported');
       'GblRptIsCommsCheckAutoChannels and  GblRptIsCommsConnectionAttempts Not Supported');
 {$ENDIF}
-  ISIndyUtilsException('Log Start', ReportLoggingStatus);
+  ISIndyUtilsException('Log Start'+crlf,ReportLoggingStatus);
 end;
 
 Function ReportLoggingStatus: string;

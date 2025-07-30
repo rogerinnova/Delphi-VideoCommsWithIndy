@@ -205,7 +205,7 @@ Var
 {$IFDEF NextGen}
 Function cRemoteResetServer: AnsiString;
 Function cRemoteServerDetails: AnsiString;
-Function cRemoteDbLog: AnsiString;
+//Function cRemoteDbLog: AnsiString;
 Function cRecoverRemoteFile: AnsiString;
 Function cRemoteFileSize: AnsiString;
 Function cRemoteForceClose: AnsiString;
@@ -219,7 +219,7 @@ Function cRemoteForceClose: AnsiString;
 Const
   cRemoteResetServer: AnsiString = 'RemoteResetServer#';
   cRemoteServerDetails: AnsiString = 'RemoteServerDetails#';
-  cRemoteDbLog: AnsiString = 'RemoteDbLog';
+//  cRemoteDbLog: AnsiString = 'RemoteDbLog';
   cRecoverRemoteFile: AnsiString = 'RecoverRemoteFile';
   cRemoteFileSize: AnsiString = 'RemoteFileSize';
   cPutRemoteFile: AnsiString = 'PutRemoteFile';
@@ -228,7 +228,7 @@ Const
 
 implementation
 
-uses {MonitorTestObjs,} ISIndyUtils, ServerInitializeCode,
+uses {MonitorTestObjs,} ISIndyUtils, IsGeneralLib,
   IsGblLogCheck;
 
 {$IFDEF NextGen}
@@ -248,10 +248,10 @@ begin
   Result := 'RemoteServerDetails#';
 end;
 
-Function cRemoteDbLog: AnsiString;
-begin
-  Result := 'RemoteDbLog';
-end;
+//Function cRemoteDbLog: AnsiString;
+//begin
+//  Result := 'RemoteDbLog';
+//end;
 
 Function cRecoverRemoteFile: AnsiString;
 begin
@@ -736,15 +736,19 @@ end;
 procedure TIsIndyApplicationServer.LoadServerIniData;
 Var
   IniFile: TIniFile;
+  IniFileName:String;
 begin
+  IniFileName:=IniFileNameFromExe;
   if GlobalDefaultFileAccessBase = '' then
-    if FileExists(GeneralIniFileName) then
+    if FileExists(IniFileName) then
     Begin
-      IniFile := TIniFile.Create(GeneralIniFileName);
+      IniFile := TIniFile.Create(IniFileName);
       GlobalDefaultFileAccessBase := IniFile.ReadString('Files',
         'FileAccessBase', '');
       if GlobalDefaultFileAccessBase = '' then
         IniFile.WriteString('Files', 'FileAccessBase', '');
+      if DefaultPort < 1 then
+         DefaultPort := IniFile.ReadInteger('TCP', 'PORT', 0);
     end;
 end;
 
@@ -1281,8 +1285,9 @@ begin
     Result := SetServerConnections(ACommand)
   else if Pos(cRemoteResetServer, ACommand) = 1 then
     Result := ResetServer(ACommand)
-  else if Pos(cRemoteDbLog + '^>>', ACommand) = 1 then
-    LogAMessage(ACommand)
+//  Function removed
+//  else if Pos(cRemoteDbLog + '^>>', ACommand) = 1 then
+//    LogAMessage(ACommand)
   else if Pos(cRemoteFileSize + '^', ACommand) = 1 then
     Result := PackAServerFileSize(DecodeSafeFileTransferPath(ACommand))
   else if Pos(CRemoteChangeLogging + '^', ACommand) = 1 then
