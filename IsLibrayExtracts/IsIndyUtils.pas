@@ -120,6 +120,7 @@ Procedure ISIndyUtilsException(Const AClassName: string; AException: Exception;
 Procedure SetExceptionLog(AExceptLogName: AnsiString;
   AStartNewLogFile: boolean = false);
 Function ExceptionLogName: string;
+Procedure FreeSListWObjects(var ThisList: TStringlist);
 
 Var
   GCountOfHistoricalCons, GCountOfConnections: integer; // Base Connections
@@ -143,7 +144,7 @@ Const
   ZSISOffset = 0;
 {$ENDIF}
 
-procedure FreeSListFO(var ThisList: TStringlist);
+procedure FreeSListWObjects(var ThisList: TStringlist);
 var
   i: integer;
   List: TStringlist;
@@ -556,7 +557,7 @@ destructor TGblRptComs.Destroy;
 begin
   FLock.Free;
   inherited;
-  FreeSListFO(FListOfData);
+  FreeSListWObjects(FListOfData);
 end;
 
 function TGblRptComs.Report: String;
