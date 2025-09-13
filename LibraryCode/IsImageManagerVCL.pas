@@ -347,7 +347,15 @@ Var
   ImgIdx, ImgCnt, ColCnt, RowCnt, ColIdx, RowIdx: integer;
   PnlWidth, PnlHeight, ImgWidth, ImgHeight: single;
   ThisPos, ThisSz: TPointF;
+{$IfDef FPC}
+ Var
+   PtfZero:TPointF;
+Begin
+  PtfZero.x:=0.0;
+  PtfZero.Y:=0.0;
+{$Else}
 begin
+{$Endif}
   if ATabPnl = nil then
     Exit;
   if ATabPnl <> FTabPnl then
@@ -360,8 +368,11 @@ begin
     if Length(FPArray) <> ImgCnt then
       ISIndyUtilsException(Self, 'Bad # of images');
     For ImgIdx := 0 to ImgCnt - 1 do
-      FPArray[ImgIdx].ReSetValues(ImgIdx, TPointF.Zero, TPointF.Zero);
-
+{$IfDef FPC}
+    FPArray[ImgIdx].ReSetValues(ImgIdx, PtfZero, PtfZero);
+{$Else}
+    FPArray[ImgIdx].ReSetValues(ImgIdx, TPointF.Zero, TPointF.Zero);
+{$Endif}
     if ImgCnt < 1 then
       Exit;
 

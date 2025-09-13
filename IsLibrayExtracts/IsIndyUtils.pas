@@ -320,7 +320,6 @@ var
   GraphicStart: Word;
 begin
   m := nil;
-  g := nil;
   try
     m := TMemoryStream.Create;
     // g := nil;
@@ -388,8 +387,8 @@ Begin
     RenameFile(ALogName, NewName);
   end;
   Result := TLogFile.Create(ALogName, true, 100000, true);
-  if (Result<>nil) And AStartNewLogFile then
-     Result.PurgeLogFilesOlderThan:= Now - 3/24;
+  if (Result <> nil) And AStartNewLogFile then
+    Result.PurgeLogFilesOlderThan := now - 3 / 24;
   Result.LogALine(#13#10#13#10 + 'New Instance of Application ' +
     FormatDateTime('dd mmm hh:nn:ss', now));
   Result.LogALine(ALogName);
@@ -423,10 +422,11 @@ Begin
   ExceptLog := InitialiseExceptionLog(AExceptLogName, AStartNewLogFile);
 
   if Not GLogISIndyUtilsException then
-    Begin
-     GLogISIndyUtilsException:=true;
-     ISIndyUtilsException('SetExceptionLog','# Auto Set GLogISIndyUtilsException');
-    end;
+  Begin
+    GLogISIndyUtilsException := true;
+    ISIndyUtilsException('SetExceptionLog',
+      '# Auto Set GLogISIndyUtilsException');
+  end;
 end;
 
 Function ExceptionLogName: string;
@@ -437,18 +437,18 @@ begin
 {$IFDEF Android}
     Result := System.IOUtils.TPath.Combine(System.IOUtils.TPath.GetHomePath,
       'AppExceptLog');
-{
-Need to follow up Chester Wilson post
-https://forums.adug.org.au/t/file-access-assistance-for-android/60847
+  {
+    Need to follow up Chester Wilson post
+    https://forums.adug.org.au/t/file-access-assistance-for-android/60847
 
->If some of you are still struggling with Android file i/o, this may be some help.
->I have spent the last few months trying hard (with a huge amount of support and help from Dave Nottage!) to put together a programme which can find files, read files (character and getting the android system to view them), write and append to files, create directories, and delete files and directories.
->It is not the fastest, using the routines which are nearly simple enough for me to understand. If you have a directory with a thousand files, be prepared to enjoy a cup of tea while you wait!
->
->This programme “FileAccess” is available via
->https://59b7770ca3fb18e4e90d-52e2682744779750b5103bbecf998085.ssl.cf2.rackcdn.com/FileAccess.zip
+    >If some of you are still struggling with Android file i/o, this may be some help.
+    >I have spent the last few months trying hard (with a huge amount of support and help from Dave Nottage!) to put together a programme which can find files, read files (character and getting the android system to view them), write and append to files, create directories, and delete files and directories.
+    >It is not the fastest, using the routines which are nearly simple enough for me to understand. If you have a directory with a thousand files, be prepared to enjoy a cup of tea while you wait!
+    >
+    >This programme “FileAccess” is available via
+    >https://59b7770ca3fb18e4e90d-52e2682744779750b5103bbecf998085.ssl.cf2.rackcdn.com/FileAccess.zip
 
-}
+  }
 
 {$ELSE}
     Result := ChangeFileExt(ExeFileNameAllPlatforms, '.log');
@@ -458,7 +458,7 @@ end;
 Procedure ISIndyUtilsException(Const AClassName, AExMessage: String);
 Var
   ss, LogNm: String;
-  PosTimeHash, LenHash: integer;
+  PosTimeHash: integer;
 Begin
   if GLogISIndyUtilsException then
   begin
@@ -470,11 +470,12 @@ Begin
     ss := AClassName;
     ss := ss + '::' + AExMessage;
     PosTimeHash := Pos('#', ss);
-    if PosTimeHash < Length(ss)+1 then
+    if PosTimeHash < Length(ss) + 1 then
       if PosTimeHash > 1 then
-        if (PosTimeHash < (Length(ss)-1))  and IsNumeric(ss[PosTimeHash + 1]) then
-          ss := '#' + ss[PosTimeHash + 1+ ZSISOffset] + Stringreplace(ss,
-            '#' + ss[PosTimeHash + 1 + ZSISOffset], '', [])
+        if (PosTimeHash < (Length(ss) - 1)) and IsNumeric(ss[PosTimeHash + 1])
+        then
+          ss := '#' + ss[PosTimeHash + 1 + ZSISOffset] +
+            Stringreplace(ss, '#' + ss[PosTimeHash + 1 + ZSISOffset], '', [])
         else
           ss := '#' + Stringreplace(ss, '#', '', []);
     ExceptLog.LogALine(ss);
@@ -578,8 +579,6 @@ begin
 end;
 
 class function TGblRptComs.ReportObjectTypes: String;
-Var
-  i: integer;
 Begin
   If not Assigned(GlobalCountOfComsObjectTypes) then
   begin
@@ -619,7 +618,7 @@ end;
 initialization
 
 finalization
-
+GLogISIndyUtilsException:=false;
 FreeAndNil(ExceptLog);
 FreeAndNil(GlobalCountOfComsObjectTypes);
 

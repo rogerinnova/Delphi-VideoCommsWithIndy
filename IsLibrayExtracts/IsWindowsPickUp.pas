@@ -1,9 +1,14 @@
 unit IsWindowsPickUp;
 
 // look at {$I UnistdAPI.inc}
+{$IFDEF FPC}
+  {$MODE Delphi}
+  {$I InnovaLibDefs.inc}
+{$ELSE}
+  {$I InnovaLibDefs.inc}
+{$ENDIF}
 
 interface
-
 uses
 {$IFDEF POSIX}
    Posix.Unistd, Posix.StdIo,
@@ -11,8 +16,11 @@ uses
 {$IFDEF NextGen}
    IsNextGenPickup,
 {$ENDIF}
+{$IfDef FPC}
+ SysUtils, Classes;
+{$Else}
   System.SysUtils, System.Classes;
-
+{$EndIf}
 Type
   DWord = LongWord;
   // TReplaceFlags = set of (rfReplaceAll, rfIgnoreCase);
@@ -110,6 +118,7 @@ Var
   Read: LongInt;
   Buffer: Array [0 .. BufMax] of byte;
   // BufferPtr:Pointer;
+  s:string;
 
 begin
   Result := False;
@@ -125,8 +134,12 @@ begin
     FileToCopy:=nil;
     FileCopy := nil;
     Try
-      FileToCopy := TFileStream.Create(ASourceName, fmOpenRead,
-        fmShareDenyNone);
+{$IfDef FPC}
+  FileToCopy := TFileStream.Create(ASourceName, fmOpenRead + fmShareDenyNone);
+{$Else}
+  FileToCopy := TFileStream.Create(ASourceName, fmOpenRead,
+      fmShareDenyNone);
+{$ENDIF}
 //      FileCopy := TFileStream.Create(ADestinationName, fmCreate,
 //        fmShareExclusive);    seems to
       FileCopy := TFileStream.Create(ADestinationName, fmcreate);
@@ -145,7 +158,11 @@ begin
     End;
     Result := true;
   Except
-    Result := False;
+    On E:exception do
+    begin
+      s:=E.message;
+      Result := False;
+    end;
   End;
 end;
 

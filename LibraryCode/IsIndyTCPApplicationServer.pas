@@ -10,14 +10,13 @@ unit IsIndyTCPApplicationServer;
 interface
 
 uses
-{$IFDEF FPC}
-  SysUtils, Classes, SyncObjs,
+{$IFDEF FPC} Copy Test SysUtils, Classes, SyncObjs,
 {$ELSE}
   System.SysUtils,
   System.Classes,
   System.SyncObjs,
 {$ENDIF}
-  IdContext, inifiles, IdTCPConnection,
+  IdContext, inifiles, IdTCPConnection, IdGlobal, IdYarn,
   IdBaseComponent, IdComponent, IdCustomTCPServer, IdTCPServer, ISStrUtl,
 {$IFDEF Nextgen}
   IsNextGenPickup,
@@ -94,6 +93,7 @@ type
     // : AnsiString;
     function ConnectionStatusText: AnsiString;
     function TextID: String; override;
+    Procedure DropSrvrReferences;
     Procedure LogAMessage(AMessage: String); override;
     Property OnSimpleRemoteAction: TComandActionAnsi Read FOnSimpleRemoteAction
       Write FOnSimpleRemoteAction;
@@ -111,6 +111,8 @@ type
     FDestroying: Boolean;
     Function RawTcpRef: TISIndyTCPSvrSession;
   Public
+    constructor Create(AConnection: TIdTCPConnection; AYarn: TIdYarn;
+      AList: TIdContextThreadList = nil); override;
     Destructor Destroy; override;
     Function TcpRef: TISIndyTCPSvrSession;
     Procedure ReleaseOldRef;
@@ -120,6 +122,7 @@ type
 
   TIsIndyApplicationServer = class(TIdTcpServer)
   Private
+    FServerClosing: Boolean;
     FLogsMissed: Integer;
     fCurrentAddresses, FLogList: TStringList;
     FBusyLock: TCriticalSection;
@@ -135,7 +138,7 @@ type
     Function ListOfRegConnections: TStringList;
     Function LocalContext(AContext: TIdContext): TIsIndyTCPServerContext;
     Function ResetSvr(AData: AnsiString): AnsiString;
-    procedure IsIdTCPSrvrContextCreated(AContext: TIdContext);
+    // procedure IsIdTCPSrvrContextCreated(AContext: TIdContext);
     procedure IsIdTCPSrvrConnect(AContext: TIdContext);
     procedure IsIdTCPSvrSessionExecute(AContext: TIdContext);
     procedure CheckBusyOnConnect(AContext: TIsIndyTCPServerContext);
@@ -145,6 +148,7 @@ type
     procedure SetMaxCallsperminute(AValue: Integer);
     procedure LoadServerIniData;
   Protected
+    procedure Shutdown; override;
     procedure AddLogMessage(ATextID, AMsg: String);
   Public
     Constructor Create(AOwner: TComponent);
@@ -200,12 +204,12 @@ type
 
 Var
   GlobalDefaultFileAccessBase: String = '';
-  GlobalContext: Integer = 0;
+  GlobalContextCount: Integer = 0;
 
 {$IFDEF NextGen}
 Function cRemoteResetServer: AnsiString;
 Function cRemoteServerDetails: AnsiString;
-//Function cRemoteDbLog: AnsiString;
+// Function cRemoteDbLog: AnsiString;
 Function cRecoverRemoteFile: AnsiString;
 Function cRemoteFileSize: AnsiString;
 Function cRemoteForceClose: AnsiString;
@@ -219,7 +223,7 @@ Function cRemoteForceClose: AnsiString;
 Const
   cRemoteResetServer: AnsiString = 'RemoteResetServer#';
   cRemoteServerDetails: AnsiString = 'RemoteServerDetails#';
-//  cRemoteDbLog: AnsiString = 'RemoteDbLog';
+  // cRemoteDbLog: AnsiString = 'RemoteDbLog';
   cRecoverRemoteFile: AnsiString = 'RecoverRemoteFile';
   cRemoteFileSize: AnsiString = 'RemoteFileSize';
   cPutRemoteFile: AnsiString = 'PutRemoteFile';
@@ -248,10 +252,10 @@ begin
   Result := 'RemoteServerDetails#';
 end;
 
-//Function cRemoteDbLog: AnsiString;
-//begin
-//  Result := 'RemoteDbLog';
-//end;
+// Function cRemoteDbLog: AnsiString;
+// begin
+// Result := 'RemoteDbLog';
+// end;
 
 Function cRecoverRemoteFile: AnsiString;
 begin
@@ -285,6 +289,9 @@ procedure TIsIndyApplicationServer.AddLogMessage(ATextID, AMsg: String);
 
 begin
   Try
+    if CLogAll then
+      ISIndyUtilsException(ATextID, AMsg);
+
     If FLogsMissed > 0 then
       ISIndyUtilsException(Self, '# Missed Msg<' + IntToStr(FLogsMissed) +
         '> AddLogMessage>>' + AMsg);
@@ -317,7 +324,7 @@ begin
       if AConnection.CheckConnection then
       Begin
         Index := FListOfRegConnections.IndexOf(AConnection.FRegisteredAs);
-        if cLogAll then
+        if GblRptRegConnectiononSrvr then
           If Index < 0 then
             AddLogMessage('Server', 'Add Registered Connection::' +
               AConnection.FRegisteredAs)
@@ -376,19 +383,18 @@ procedure TIsIndyApplicationServer.CheckBusyOnConnect
 // See Also \MonitorServers\MonitorTestObjs >> TSrverUsageAndBlockObj
 Var
   // Connections on Ip Address
-  s: string;
   IpIdx: Integer;
   IObj: TBusyCheckCalls;
   IpStr: string;
 begin
+  if FServerClosing then
+    Exit;
   if AContext = nil then
-    exit;
+    Exit;
   if AContext.Connection = nil then
-    exit;
-
+    Exit;
   Try
     IpStr := AContext.TcpRef.Address;
-    IObj := nil;
     FBusyLock.Enter;
     try
       if CurrentAddresses.Find(IpStr, IpIdx) then
@@ -400,12 +406,12 @@ begin
         IObj := TBusyCheckCalls.Create(FTimeLimitFor80Calls, IpStr);
         fCurrentAddresses.AddObject(IpStr, IObj);
       end;
+      if IObj <> nil then
+        if not IObj.NotTooBusy(FTimeLimitFor80Calls) then
+          AddLogMessage(IpStr, 'Too Busy');
     finally
       FBusyLock.Release;
     end;
-    if IObj <> nil then
-      if not IObj.NotTooBusy(FTimeLimitFor80Calls) then
-        AddLogMessage(IpStr, 'Too Busy');
   Except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'CheckBusyOnConnect');
@@ -423,8 +429,10 @@ Var
   // packets on channel
   s: string;
 begin
+  if FServerClosing then
+    Exit;
   if ASession = nil then
-    exit;
+    Exit;
   Try
     Inc(ASession.FCountTo80);
     if ASession.FCountTo80 > 80 then
@@ -481,6 +489,7 @@ Const
 
 constructor TIsIndyApplicationServer.Create(AOwner: TComponent);
 begin
+  FServerClosing := false;
   // Four Seconds;
   FTimeLimitFor80Transactions := cStart80TransactionAllowence;
   FListLock := TCriticalSection.Create;
@@ -489,7 +498,7 @@ begin
   ContextClass := TIsIndyTCPServerContext;
   OnConnect := IsIdTCPSrvrConnect;
   OnExecute := IsIdTCPSvrSessionExecute;
-  OnContextCreated := IsIdTCPSrvrContextCreated;
+  // OnContextCreated := IsIdTCPSrvrContextCreated;
   MaxCallsPerMinute := 800;
   ISIndyUtilsException(Self,
     '#' + 'New IsIndyApplicationServer Max Calls Per Min ' +
@@ -507,9 +516,9 @@ var
 begin
   Result := '';
   if fCurrentAddresses = nil then
-    exit;
+    Exit;
   if fCurrentAddresses.Count < 1 then
-    exit;
+    Exit;
 
   for i := 0 to fCurrentAddresses.Count - 1 do
   begin
@@ -528,6 +537,8 @@ begin
   begin
     fCurrentAddresses := TStringList.Create;
     fCurrentAddresses.Sorted := true;
+    fCurrentAddresses.OwnsObjects := true;
+   //TBusyCheckCalls
   end;
   Result := fCurrentAddresses;
 end;
@@ -539,9 +550,18 @@ begin
     FLogList.Free;
     FListLock.Free;
     FBusyLock.Free;
+    fCurrentAddresses.Free;
   Except
   end;
   inherited;
+  try
+    if GlobalContextCount > 0 then
+      ISIndyUtilsException(Self, 'Destroy - Context Count=' +
+        IntToStr(GlobalContextCount))
+  except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'Destroy - Report Context Count')
+  end;
 end;
 
 procedure TIsIndyApplicationServer.DropRegConnection
@@ -550,13 +570,13 @@ Var
   Index: Integer;
 begin
   if AConnection = nil then
-    exit;
-  if cLogAll then
+    Exit;
+  if GblRptMakeConnectionOnSrvr then
     AddLogMessage('Server', 'TIsIndyApplicationServer.DropRegConnection');
   If FListOfRegConnections = nil Then
-    exit;
+    Exit;
   if AConnection = nil then
-    exit;
+    Exit;
 
   Index := FListOfRegConnections.IndexOfObject(AConnection);
   if Index >= 0 then
@@ -588,13 +608,12 @@ Var
   LContext: TIsIndyTCPServerContext;
   LConnection: TIdTCPConnection;
   TcpCtx: TISIndyTCPSvrSession;
-  s: String;
 begin
   if AContext = nil then
-    exit;
+    Exit;
+  TcpCtx := nil;
+  LContext := LocalContext(AContext);
   Try
-    LContext := LocalContext(AContext);
-    TcpCtx := nil;
     if LContext = nil then
       ISIndyUtilsException(Self, '#IsIdTCPSvrSessionExecute Nil Local Context')
     else
@@ -603,7 +622,7 @@ begin
     if TcpCtx = nil then
     begin
       ISIndyUtilsException(Self, '#IsIdTCPSvrSessionExecute Nil TcpCtx');
-      exit;
+      Exit;
     end;
 
     LConnection := LContext.Connection;
@@ -615,7 +634,7 @@ begin
       else
         ISIndyUtilsException(Self, '#IsIdTCPSvrSessionExecute Wrong TcpCtx ::' +
           TcpCtx.TextID);
-      exit;
+      Exit;
     end;
 
     if LConnection <> nil then
@@ -631,7 +650,7 @@ begin
               FormatDateTime('dd hh:nn:ss.zzz', FResetStartTime));
             LConnection.Disconnect;
             Sleep(1000);
-            exit;
+            Exit;
           end;
         if TcpCtx <> nil then
           If not TcpCtx.ProcessNextTransaction Then
@@ -686,7 +705,7 @@ begin
     ThisSession.OnAnsiStringAction := OnSessionAnsiStringAction;
     ThisSession.OnStringAction := OnSessionStringAction;
     ThisSession.OnSimpleRemoteAction := OnSessionSimpleRemoteAction;
-    if cLogAll then
+    if GblRptMakeConnectionOnSrvr then
       AddLogMessage('Server', 'On Connect::' + IntToStr(FServerTcpSessions));
 
     if FResetStartTime > 0.01 then
@@ -716,11 +735,11 @@ begin
   end;
 end;
 
-procedure TIsIndyApplicationServer.IsIdTCPSrvrContextCreated
-  (AContext: TIdContext);
-begin
-  Inc(GlobalContext);
-end;
+// procedure TIsIndyApplicationServer.IsIdTCPSrvrContextCreated
+// (AContext: TIdContext);
+// begin
+// Inc(GlobalContextCount);
+// end;
 
 function TIsIndyApplicationServer.ListOfRegConnections: TStringList;
 begin
@@ -736,19 +755,23 @@ end;
 procedure TIsIndyApplicationServer.LoadServerIniData;
 Var
   IniFile: TIniFile;
-  IniFileName:String;
+  IniFileName: String;
 begin
-  IniFileName:=IniFileNameFromExe;
+  IniFileName := IniFileNameFromExe;
   if GlobalDefaultFileAccessBase = '' then
     if FileExists(IniFileName) then
     Begin
       IniFile := TIniFile.Create(IniFileName);
-      GlobalDefaultFileAccessBase := IniFile.ReadString('Files',
-        'FileAccessBase', '');
-      if GlobalDefaultFileAccessBase = '' then
-        IniFile.WriteString('Files', 'FileAccessBase', '');
-      if DefaultPort < 1 then
-         DefaultPort := IniFile.ReadInteger('TCP', 'PORT', 0);
+      try
+        GlobalDefaultFileAccessBase := IniFile.ReadString('Files',
+          'FileAccessBase', '');
+        if GlobalDefaultFileAccessBase = '' then
+          IniFile.WriteString('Files', 'FileAccessBase', '');
+        if DefaultPort < 1 then
+          DefaultPort := IniFile.ReadInteger('TCP', 'PORT', 0);
+      finally
+        IniFile.Free;
+      end;
     end;
 end;
 
@@ -806,14 +829,25 @@ begin
 end;
 
 function TIsIndyApplicationServer.ServerDetailsAsText: AnsiString;
+{ Sub } Function IPVersionStr(AVersionType: TIdIPVersion): String;
+  Begin
+    Result := '';
+    case AVersionType of
+      Id_IPv4:
+        Result := 'IPv4';
+      Id_IPv6:
+        Result := 'IPv6';
+    end;
+  end;
+
 Var
   i: Integer;
 begin
   Result := '';
   if Bindings <> nil then
     for i := 0 to Bindings.Count - 1 do
-      Result := Result + 'Listening on Port ' +
-        IntToStr(Bindings[i].Port) + #13#10;
+      Result := Result + 'Listening on Port ' + IntToStr(Bindings[i].Port) + ' '
+        + IPVersionStr(Bindings[i].IPVersion) + #13#10;
   Result := Result + 'Maximum Calls Per Minute is ' +
     IntToStr(MaxCallsPerMinute) + #13#10;
   if fCurrentAddresses <> nil then
@@ -822,7 +856,7 @@ begin
   if Contexts <> nil then
     Result := Result + 'Current Sessions =' + IntToStr(Contexts.Count) + #13#10;
   Result := Result + 'Current Server Context Objects =' +
-    IntToStr(GlobalContext) + #13#10;
+    IntToStr(GlobalContextCount) + #13#10;
   Result := Result + 'Current Server TCP Objects =' +
     IntToStr(FServerTcpSessions) + #13#10;
 end;
@@ -832,15 +866,33 @@ begin
   FTimeLimitFor80Calls := 80 / AValue / 24 / 60;
 end;
 
+procedure TIsIndyApplicationServer.Shutdown;
+Var
+  Start: TDateTime;
+begin
+  Start := now;
+  FServerClosing := true;
+  inherited;
+  ISIndyUtilsException(Self, 'Shutdown time =' + FormatDateTime('nn:ss.zzz',
+    now - Start));
+end;
+
 { TIsIndyTCPServerContext }
+
+constructor TIsIndyTCPServerContext.Create(AConnection: TIdTCPConnection;
+  AYarn: TIdYarn; AList: TIdContextThreadList);
+begin
+  inherited;
+  Inc(GlobalContextCount);
+end;
 
 destructor TIsIndyTCPServerContext.Destroy;
 begin
   try
-    Dec(GlobalContext);
+    Dec(GlobalContextCount);
     FDestroying := true;
-    // if Assigned(FTcpRef) then
-    // FTcpRef.LogAMessage('CLOSING');
+    if FTcpRef <> nil then
+      FTcpRef.DropSrvrReferences;
     FreeAndNil(FTcpRef);
   finally
     inherited;
@@ -852,7 +904,7 @@ begin
   Try
     Result := nil;
     if FDestroying then
-      exit;
+      Exit;
 
     if FTcpRef = nil then
     begin
@@ -880,7 +932,7 @@ function TIsIndyTCPServerContext.RawTcpRef: TISIndyTCPSvrSession;
 begin
   Result := FTcpRef;
   if FDestroying then
-    exit;
+    Exit;
   If FTcpRef.TcpConnection = nil then
     If FTcpRef.FServerConnext = Self then
     Begin
@@ -1034,7 +1086,11 @@ destructor TISIndyTCPSvrSession.Destroy;
 Var
   Srv: TIsIndyApplicationServer;
 begin
+  Srv := nil;
   try
+    if FServerConnext <> nil then
+      if FServerConnext.FTcpRef = Self then
+        FServerConnext.FTcpRef := nil;
     Try
       if FServerObject is TIsIndyApplicationServer then
       Begin
@@ -1143,7 +1199,7 @@ var
 {$IFDEF NEXTGEN}
   TstStr,
 {$ENDIF}
-  DataReturn, DataSend, CMDFileName: AnsiString;
+  DataSend, CMDFileName: AnsiString;
   ServerFile: TFileStream;
   ChrDataIn, ChrDataSt, Tst: PAnsiChar;
   Saved: Integer;
@@ -1214,7 +1270,7 @@ begin
             begin
               ISIndyUtilsException(Self, E, 'ExtractFileDir(' +
                 TrfFileName + ')');
-              exit;
+              Exit;
             end;
           end;
         ServerFile := TFileStream.Create(TrfFileName, fmCreate);
@@ -1285,9 +1341,9 @@ begin
     Result := SetServerConnections(ACommand)
   else if Pos(cRemoteResetServer, ACommand) = 1 then
     Result := ResetServer(ACommand)
-//  Function removed
-//  else if Pos(cRemoteDbLog + '^>>', ACommand) = 1 then
-//    LogAMessage(ACommand)
+    // Function removed
+    // else if Pos(cRemoteDbLog + '^>>', ACommand) = 1 then
+    // LogAMessage(ACommand)
   else if Pos(cRemoteFileSize + '^', ACommand) = 1 then
     Result := PackAServerFileSize(DecodeSafeFileTransferPath(ACommand))
   else if Pos(CRemoteChangeLogging + '^', ACommand) = 1 then
@@ -1332,6 +1388,12 @@ begin
       ISIndyUtilsException(Self, 'Error DropCoupledSession:' + E.Message);
   End;
   FCoupledSession := nil;
+end;
+
+procedure TISIndyTCPSvrSession.DropSrvrReferences;
+begin
+  FServerObject := nil;
+  FServerConnext := nil;
 end;
 
 procedure TISIndyTCPSvrSession.LogAMessage(AMessage: String);
@@ -1434,7 +1496,7 @@ begin
   ServerFile := nil;
   Result := '';
   if AFileName = '' then
-    exit;
+    Exit;
 
   if not FileExists(AFileName) then
     raise Exception.Create(AFileName + cNoExistMessage);
@@ -1491,7 +1553,7 @@ begin
             Echo := PackTransaction(Key + Trans, FRandomKey);
             // Echo := PackTransaction(Key + '[' + Trans + ']', FRandomKey);
             Write(Echo);
-            if cLogAll then
+            if GblRptMakeConnectionOnSrvr then
               LogAMessage('Echo' + Trans + ' Key:' + Key);
             Result := true;
           End;
@@ -1504,7 +1566,7 @@ begin
             Begin
               RawRtn := PackTransaction(Key + Rtn, FRandomKey);
               Write(RawRtn);
-              if cLogAll then
+              if CLogAll then
               begin
                 if Length(Rtn) > 40 then
 {$IFDEF NEXTGEN}
@@ -1591,14 +1653,6 @@ begin
               ' #ProcessNextTransaction NewConnection Data<' + Trans + '>');
             Result := false;
           end;
-        PartTrnData:
-          Begin
-            ISIndyUtilsException(Self,
-              ' #ProcessNextTransaction PartTrnData Data<' + Trans + '>');
-            Result := false;
-          end;
-        { FlgError, FlgNull, MvString, MvRawStrm, SmpAct,
-          EchoTrans, FullDuplexMode, RdFileTrfBlk, PtFileTrfBlk, }
         LogServerData:
           Begin
             ISIndyUtilsException(Self,
@@ -1655,7 +1709,7 @@ begin
   Begin
     CloseConnection;
     Result := 'Closing Single Connection';
-    exit;
+    Exit;
   End;
 end;
 
@@ -1672,7 +1726,7 @@ begin
   if FServerObject is TIsIndyApplicationServer then
     Svr := FServerObject as TIsIndyApplicationServer
   else
-    exit;
+    Exit;
 
   LogAMessage('Set Svr Con ' + AConnectData);
 
@@ -1681,7 +1735,7 @@ begin
   Tst := Length(cRemoteSetServerRelay) + 1;
   Result := '';
   if Pos(cRemoteSetServerRelay, AConnectData) <> 1 then
-    exit;
+    Exit;
   WillOwn := false;
   NewCon := nil;
   Inx := Pos(cServerLink, AConnectData);
@@ -1759,11 +1813,11 @@ begin
   Result := '';
   Try
     if Pos(cRemoteServerConnections, ARegData) <> 1 then
-      exit;
+      Exit;
     if FServerObject is TIsIndyApplicationServer then
       Svr := FServerObject as TIsIndyApplicationServer
     else
-      exit;
+      Exit;
 
     NewReg := Copy(ARegData, Length(cRemoteServerConnections) + 1, 255);
     if IsEmptyString(NewReg) then
@@ -1903,6 +1957,7 @@ var
   LocalAllocationTime, TM: TDateTime;
 begin
   Result := true;
+  TM := 0.0;
   Inc(FCountTo80);
   Inc(FTotalCalls);
   if FCountTo80 > 80 then
@@ -1980,6 +2035,7 @@ end;
 procedure TIsMonitorTCPAppServer.TTstThrd.Execute;
 Var
   FTst: TISIndyTCPClient;
+  Rslt: String;
 begin
   While not Terminated do
     Try
@@ -1988,11 +2044,20 @@ begin
         if FTst.Active then
         Begin
           FLastStatus := now;
+          Rslt := FTst.ServerDetails;
+          if Pos('Port ' + IntToStr(FPort), Rslt) < 7 then
+            raise Exception.Create('Bad Details Returned');
+          if FLogged then
+            ISIndyUtilsException(Self, '# Return Success Ip=' + FIpAddress + ':'
+              + IntToStr(FPort));
           FLogged := false;
         End
         Else If not FLogged then
+        begin
           ISIndyUtilsException(Self, '# Failed Test Ip=' + FIpAddress + ':' +
             IntToStr(FPort));
+          FLogged := true;
+        end;
         Sleep(60000);
       Finally
         FreeAndNil(FTst);
