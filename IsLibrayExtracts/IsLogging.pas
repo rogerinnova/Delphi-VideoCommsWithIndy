@@ -91,6 +91,7 @@ function PurgeFileStrmOverSz(AFileStream: TFileStream;
 // function FindALogFile(const ALogRootName:AnsiString=''):AnsiString;
 Function LogDateStamp: String;
 Function AddFormatedLogDateStamp(s: String): string;
+Function AllPlatformExeFileNameFrmISProcCl:String;
 
 Var
   SuppressChecksForTesting: Boolean = false;
@@ -100,14 +101,65 @@ Const
 
 implementation
 
-uses ISStrUtl, ISUnicodeStrUtl, IsindyUtils
-{$IFNDEF FPC}
-    , IsProcCl
-{$ENDIF};
+uses {ISStrUtl,} ISUnicodeStrUtl, IsindyUtils;
 
 var
   LogFT: TLogFile = nil;
   IsNew: Integer = 67;
+
+Function AllPlatformExeFileNameFrmISProcCl:String;
+{ X.Env.SearchPath - Returns the currently registered search path on the system.
+  X.Env.AppFilename - Returns the "app" name of the application.  On OS X this is the application package in which the exe resides.  On Windows, this is the name of the folder in which the exe resides.
+  X.Env.ExeFilename - Returns the actual filename of the running executable.
+  X.Env.AppFolder - Returns the folder path to the executable, stopping at the level of the application package on OSX.
+  X.Env.ExeFolder - Returns the full folder path to the executable.
+  X.Env.TempFolder - Returns a writable temp folder path that can be used by your application.
+  X.Env.HomeFolder - Returns the user's writable home folder.  On OS X this equates to /Users/username and on Windows,  C:\Users\username\AppData\Roaming or the appropriate path as set on the system.
+}
+{$IFDEF Android}
+//{$IFDEF ISD103R_DELPHI}
+//begin
+//  Result := System.IOUtils.TPath.GetAppPath + ApplicationNameIS;
+//end;
+//{$ELSE}
+Const
+  cPre = 'com.embarcadero.';
+  cPost = '/files';
+Var
+  HomePath: String;
+  idx: Integer;
+Begin
+  HomePath := System.IOUtils.TPath.GetHomePath;
+  idx := Pos(cPre, HomePath);
+  if idx > 3 then
+  Begin
+    idx := Pos(cPost, HomePath);
+    if idx > 3 then
+    Begin
+      SetLength(HomePath, idx - 1);
+      Result := HomePath;
+    End
+    else
+      Result := 'Idx Ppst:' + IntToStr(idx);
+  end;
+end;
+//{$ENDIF}
+{$ELSE}
+{$IFDEF POSIX}
+
+Var
+  i: Integer;
+begin
+  i := Pos('.app', Result);
+  if i > 2 then
+    SetLength(Result, i + 3);
+end;
+{$ELSE}
+
+begin
+  Result := ParamStr(0);
+end;
+{$ENDIF}{$ENDIF}
 
 procedure PurgeFilesOlderThan(AMask: AnsiString; APurgeDate: TDateTime);
 {$IFNDEF MsWindows}
@@ -165,7 +217,7 @@ Begin
   else If AInDocs Then
     Result := TPath.Combine(TPath.GetDocumentsPath, 'InnovaSolutionsLogs');
   Result := TPath.Combine(Result,
-    (ChangeFileExt(ExtractFileName(ExeFileNameAllPlatforms), '.log')));
+    (ChangeFileExt(ExtractFileName(AllPlatformExeFileNameFrmISProcCl), '.log')));
 End;
 
 Function AddFormatedLogDateStamp(s: String): String;
@@ -254,7 +306,7 @@ begin
     if LogFT = nil then
       LogFT := TLogFile.Create(UniqueName + '.log', false)
     else if IsNew = 67 then
-      LogFT.LogALine(CRLF + ' Appended on ' + LogDateStamp);
+      LogFT.LogALine(#13#10 + ' Appended on ' + LogDateStamp);
     IsNew := 0;
     if LogFT <> nil then
       LogFT.LogALine(s);
@@ -334,7 +386,7 @@ begin
       MemStream.CopyFrom(AFileStream, ToCopy);
       AFileStream.Position := 0;
       AFileStream.Size := 0;
-      s := CRLF + '<Truncating Here :: ' + LogDateStamp + '>' + CRLF + CRLF;
+      s := #13#10 + '<Truncating Here :: ' + LogDateStamp + '>' + #13#10 + #13#10;
 {$IFDEF NextGen}
       s.WriteBytesToStrm(AFileStream, s.Length);
 {$ELSE}
@@ -498,14 +550,14 @@ end;
 
 procedure TLogFile.LogALine(const s: String);
 Var
-  AsciiS, SCRLF: AnsiString;
+  AsciiS, Scrlf: AnsiString;
   NewLocalLast: String;
 begin
   if FDisAbleLogging then
     exit;
   if FLock = nil then
   Begin
-    SCRLF := 'Just To Break';
+    Scrlf := 'Just To Break';
     exit;
   end;
 
@@ -575,11 +627,11 @@ begin
       End;
 
       FLastLogMessage := NewLocalLast;
-      SCRLF := AsciiS + #13#10;
+      Scrlf := AsciiS +  #13#10;
 {$IFDEF NEXTGEN}
-      SCRLF.WriteBytesToStrm(FFileStm, SCRLF.Length);
+      Scrlf.WriteBytesToStrm(FFileStm, Scrlf.Length);
 {$ELSE}
-      FFileStm.Write(SCRLF[1], Length(SCRLF));
+      FFileStm.Write(Scrlf[1], Length(Scrlf));
 {$ENDIF}
     Except
       FreeAndNil(FFileStm);
@@ -606,7 +658,7 @@ const
   OpenMessage: string = 'Next Entry Raw Unicode' + #10 + #13;
 Var
   ByteLength: Integer;
-  SCRLF: String;
+  Scrlf: String;
 
 begin
   if FDisAbleLogging then
@@ -637,9 +689,9 @@ begin
       FFileStm.Seek(Int64(0), soFromEnd);
       ByteLength := Length(OpenMessage) * 2;
       FFileStm.Write(OpenMessage[1], ByteLength);
-      SCRLF := s + #13#10;
-      ByteLength := Length(SCRLF) * 2;
-      FFileStm.Write(SCRLF[1], ByteLength);
+      Scrlf := s +  #13#10;
+      ByteLength := Length(Scrlf) * 2;
+      FFileStm.Write(Scrlf[1], ByteLength);
     End;
     try
       if FFileStm <> nil then
@@ -736,7 +788,7 @@ begin
   If FileExists(FFileName) then
     exit;
 
-  s := LogDateStamp + CRLF;
+  s := LogDateStamp + #13#10;
   LocalStm := TFileStream.Create(FFileName, FmCreate);
   Try
 {$IFDEF NextGen}

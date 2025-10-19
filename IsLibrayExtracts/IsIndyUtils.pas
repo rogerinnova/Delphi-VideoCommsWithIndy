@@ -53,7 +53,7 @@ Uses
 {$IFDEF MSWindows}
   WinApi.Windows,
 {$ENDIF}
-  IsProcCl, IdGlobal, Classes, SyncObjs, sysutils,
+  {IsProcCl,} IdGlobal, Classes, SyncObjs, sysutils,
 {$IFNDEF FPC}
   IOUtils,
 {$ENDIF}
@@ -375,7 +375,13 @@ Var
 Begin
   Result := ExceptLog;
   If Result <> nil then
-    Exit;
+    if AStartNewLogFile then
+    Begin
+      ExceptLog.LogALine('InitialiseExceptionLog Closing to open new log');
+      FreeAndNil(ExceptLog);
+    End
+    else
+      Exit;
 
   If ALogName = '' then
     ALogName := ExceptionLogName;
@@ -451,7 +457,7 @@ begin
   }
 
 {$ELSE}
-    Result := ChangeFileExt(ExeFileNameAllPlatforms, '.log');
+    Result := ChangeFileExt(AllPlatformExeFileNameFrmISProcCl, '.log');
 {$ENDIF}
 end;
 
@@ -618,7 +624,8 @@ end;
 initialization
 
 finalization
-GLogISIndyUtilsException:=false;
+
+GLogISIndyUtilsException := false;
 FreeAndNil(ExceptLog);
 FreeAndNil(GlobalCountOfComsObjectTypes);
 

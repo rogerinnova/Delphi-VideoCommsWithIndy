@@ -230,6 +230,35 @@ VER230 	Delphi XE2 / C++Builder XE2 	16
   {$IfDef IOS}
    {  $Define AUTOREFCOUNT}
    {  $Define NEXTGEN}
-  {$Endif}   
+  {$Endif}
+{$ENDIF}
+
+
+//Delphi 13 Florence
+{$IFDEF VER370}
+  {$DEFINE ISXE2_DELPHI}
+  {$DEFINE ISXE3_DELPHI}
+  {$DEFINE ISXE4_DELPHI}
+  {$DEFINE ISXE5_DELPHI}
+  {$DEFINE ISXE6_DELPHI}
+  {$DEFINE ISXE7_DELPHI}
+  {$DEFINE ISXE8_DELPHI}
+  {$DEFINE ISD10S_DELPHI}
+  {$DEFINE ISD101B_DELPHI}
+  {$DEFINE ISD102T_DELPHI}
+  {$DEFINE ISD103R_DELPHI}
+  {$DEFINE ISD104S_DELPHI}
+  {$DEFINE ISD11A_DELPHI}
+  {$DEFINE ISD12A_DELPHI}
+  {$DEFINE ISD13F_DELPHI}
+  {$DEFINE IDCookie}
+  {$IfDef Android}
+   {   $Define AUTOREFCOUNT}
+   {   $Define NEXTGEN}
+  {$Endif}
+  {$IfDef IOS}
+   {  $Define AUTOREFCOUNT}
+   {  $Define NEXTGEN}
+  {$Endif}
 {$ENDIF}
 

@@ -118,8 +118,11 @@ uses Math, isStrUtl, DateUtils,
   IsArrayLib;
 const
   BckPreStg = 'bu~~';
-{$IfNDef FPC}
+{$IfDef Win32}
   LocalINVALID_HANDLE_VALUE: DWord = INVALID_HANDLE_VALUE;
+{$Endif}
+{$IfDef Win64}
+  LocalINVALID_HANDLE_VALUE: LongInt = -1;
 {$ENDIF}
 
 function ShortenFileName(const AFullFilName: AnsiString; AMaxLength: Integer)
