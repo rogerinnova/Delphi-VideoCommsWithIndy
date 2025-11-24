@@ -364,52 +364,41 @@ Begin
     Result := Assigned(WakeMainThread);
 End;
 
-Var
-  ExceptLog: TLogFile = nil;
-
 Function InitialiseExceptionLog(ALogName: string; AStartNewLogFile: boolean)
   : TLogFile;
 Var
-  Extn, NewName: String;
+  Extn: String;
 
 Begin
+  If ALogName = '' then
+    ALogName := ExceptionLogName;
+
   Result := ExceptLog;
-  If Result <> nil then
-    if AStartNewLogFile then
+  If (ExceptLog <> nil) then
+    if AStartNewLogFile or (ExceptLog.FileName <> ALogName) then
     Begin
       ExceptLog.LogALine('InitialiseExceptionLog Closing to open new log');
-      FreeAndNil(ExceptLog);
+      FreeAndNil(Result); // frees ExceptLog and LogFt
     End
     else
       Exit;
 
-  If ALogName = '' then
-    ALogName := ExceptionLogName;
-
-  if AStartNewLogFile and FileExists(ALogName) then
+  if FileExists(ALogName) then
   Begin
-    Extn := ExtractFileExt(ALogName);
-    NewName := ChangeFileExt(ALogName, FormatDateTime('mmddsszzz', now) + Extn);
-    RenameFile(ALogName, NewName);
-  end;
-  Result := TLogFile.Create(ALogName, true, 100000, true);
-  if (Result <> nil) And AStartNewLogFile then
-    Result.PurgeLogFilesOlderThan := now - 3 / 24;
-  Result.LogALine(#13#10#13#10 + 'New Instance of Application ' +
-    FormatDateTime('dd mmm hh:nn:ss', now));
-  Result.LogALine(ALogName);
-  // Result.HoldStream := false; // Normal case
-
-  if not GeneralLogIsOpen then
-    AppendLogFile(ALogName, 100000, false)
-  else if ALogName = GeneralLogName then
-    Exit
-  else
+    AppendLogFile(ALogName, 100000, true); // Starts LogFt
+    ExceptLog := LogALineObject('#InitialiseExceptionLog');
+    If AStartNewLogFile then
+      ExceptLog.RollAndFlagNewApplication;
+  End
+  Else
   Begin
-    IsLogging.LogALine(#13#10#13#10 + 'Now using ExceptLog.LogALine(LogNm)=' +
-      ALogName + #13#10#13#10);
-    AppendLogFile(ALogName, 100000, false);
-  end;
+    AppendLogFile(ALogName, 100000, true); // Starts LogFt
+    ExceptLog := LogALineObject('#InitialiseExceptionLog');
+    LogALine(#13#10#13#10 + 'New Instance of Application ' +
+      ExtractFileName(AllPlatformExeFileNameFrmISProcCl) + ' ::  ' +
+      FormatDateTime('dd mmm hh:nn:ss', Now));
+  End;
+  Result := ExceptLog;
 end;
 
 Procedure SetExceptionLog(AExceptLogName: AnsiString;
@@ -425,7 +414,7 @@ Begin
       FreeAndNil(ExceptLog);
     end;
 
-  ExceptLog := InitialiseExceptionLog(AExceptLogName, AStartNewLogFile);
+  InitialiseExceptionLog(AExceptLogName, AStartNewLogFile);
 
   if Not GLogISIndyUtilsException then
   Begin
@@ -467,30 +456,33 @@ Var
   PosTimeHash: integer;
 Begin
   if GLogISIndyUtilsException then
-  begin
-    if ExceptLog = nil then
-    Begin
-      LogNm := ExceptionLogName;
-      ExceptLog := InitialiseExceptionLog(LogNm, false);
-    end;
-    ss := AClassName;
-    ss := ss + '::' + AExMessage;
-    PosTimeHash := Pos('#', ss);
-    if PosTimeHash < Length(ss) + 1 then
-      if PosTimeHash > 1 then
-        if (PosTimeHash < (Length(ss) - 1)) and IsNumeric(ss[PosTimeHash + 1])
-        then
-          ss := '#' + ss[PosTimeHash + 1 + ZSISOffset] +
-            Stringreplace(ss, '#' + ss[PosTimeHash + 1 + ZSISOffset], '', [])
-        else
-          ss := '#' + Stringreplace(ss, '#', '', []);
-    ExceptLog.LogALine(ss);
-  end;
-{$IFDEF Debug}
+    try
+      if ExceptLog = nil then
+      Begin
+        LogNm := ExceptionLogName;
+        ExceptLog := InitialiseExceptionLog(LogNm, false);
+      end;
+      ss := AClassName;
+      ss := ss + '::' + AExMessage;
+      PosTimeHash := Pos('#', ss);
+      if PosTimeHash < Length(ss) + 1 then
+        if PosTimeHash > 1 then
+          if (PosTimeHash < (Length(ss) - 1)) and IsNumeric(ss[PosTimeHash + 1])
+          then
+            ss := '#' + ss[PosTimeHash + 1 + ZSISOffset] +
+              Stringreplace(ss, '#' + ss[PosTimeHash + 1 + ZSISOffset], '', [])
+          else
+            ss := '#' + Stringreplace(ss, '#', '', []);
+      ExceptLog.LogALine(ss);
+    Except
 {$IFDEF MSWindows}
-  OutputDebugString(PChar('ISIndyUtils::' + ss));
+      On E: Exception do
+        OutputDebugString(PChar('ISIndyUtils Exception::' + E.Message +
+          '::' + ss));
 {$ENDIF}
-{$ENDIF}
+    end;
+  // {$IFDEF Debug}
+  // {$ENDIF}
 End;
 
 Procedure ISIndyUtilsException(Const AClassName: string; AException: Exception;
@@ -507,7 +499,12 @@ Begin
   if AObject = nil then
     ISIndyUtilsException('Null Object', AExMessage)
   else
-    ISIndyUtilsException(AObject.ClassName, AExMessage);
+    Try
+      ISIndyUtilsException(AObject.ClassName, AExMessage);
+    Except
+      On E: Exception do
+        ISIndyUtilsException('Expired Object', AExMessage)
+    End;
 End;
 
 Procedure ISIndyUtilsException(AObject: TObject; AException: Exception;
@@ -590,12 +587,12 @@ Begin
   begin
     GlobalCountOfComsObjectTypes := TGblRptComs.Create;
     Result := #13#10 + 'Start Reporting IP Objects - Total Historical=' +
-      IntToStr(GCountOfHistoricalCons) + FormatDateTime('  dd mmm hh:nn', now);
+      IntToStr(GCountOfHistoricalCons) + FormatDateTime('  dd mmm hh:nn', Now);
   end
   else
   begin
     Result := #13#10 + 'Reporting IP Objects - ' +
-      FormatDateTime('  dd mmm hh:nn', now) + #13#10 + 'Total current=' +
+      FormatDateTime('  dd mmm hh:nn', Now) + #13#10 + 'Total current=' +
       IntToStr(GCountOfConnections) + ' and Total Historical=' +
       IntToStr(GCountOfHistoricalCons) + GlobalCountOfComsObjectTypes.Report;
   end;
@@ -626,7 +623,7 @@ initialization
 finalization
 
 GLogISIndyUtilsException := false;
-FreeAndNil(ExceptLog);
 FreeAndNil(GlobalCountOfComsObjectTypes);
 
+// FreeAndNil(ExceptLog); is
 end.

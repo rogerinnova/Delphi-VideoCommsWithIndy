@@ -21,7 +21,7 @@ uses FMX.Media, Sysutils, Classes, System.IOUtils, System.Math,
   IsPermissions,
 {$ENDIF}
 {$ENDIF}
-  IsMediaCommsObjs;
+  IsGblLogCheck, IsMediaCommsObjs;
 
 Const
 {$IF DEFINED(ANDROID) OR DEFINED(IOS)}
@@ -95,7 +95,7 @@ Type
 
   TThreadTxComImage = class(TThread)
   private
-    FThreadLock: TCriticalSection;
+    FImgTxThrdLock: TCriticalSection;
     FOwner: TIsMediaCapture;
     FLCopyVideoComsChls: TList<TVideoComsChannel>;
     FDataToSend: AnsiString;
@@ -108,10 +108,13 @@ Type
     function AddBitMapString(ABitmapString: AnsiString): Boolean;
   end;
 
-TIsMediaCapture = class(TObject)
+  TSentBitMapEvent = Procedure(ABitmap: TBitmap; ASentImages: integer)
+    of Object;
+
+  TIsMediaCapture = class(TObject)
   private
     FInDestroy: Boolean;
-    FLockObj: TCriticalSection;
+    FCaptureLockObj: TCriticalSection;
     // lock media device only one thread in SampleVideoBufferReady at a time
     FLastBitmap: TBitmap;
     // FCaptureManager: TCaptureDeviceManager;
@@ -135,12 +138,13 @@ TIsMediaCapture = class(TObject)
     // Direct Camera to bitmap (owned by Image Component)
     FSentMaps: Array of TBitmap; // past comms bitmaps Owned by this object
     FNxtPos, FLostCount: integer;
-    fOnError: TErrorProc;
     FComsBitmapWidth, FComsBitmapHeight: integer;
     FVideoComsChannels: TList<TVideoComsChannel>; // Drop All Channels
     FSyncReturns, FSyncBitmap: Boolean;
-    FSendImageThread: TThreadTxComImage;
     // returns or bitmap update must be in mainthread
+    FSendImageThread: TThreadTxComImage;
+    fOnError: TErrorProc;
+    FOnSendBitMap: TSentBitMapEvent;
     procedure AddSentBitMapCopy(ABitmap: TBitmap);
     Function ComsBitMap: TBitmap;
     Function IndexOfDevice(AObj: TObject): integer;
@@ -150,6 +154,7 @@ TIsMediaCapture = class(TObject)
     // Not Reqired for Audio??
     // maybe change files
     procedure ErrorMessage(AMsg: String);
+    procedure AlwaysSyncOnSendBitMap;
     Procedure GetDevices(AForceTestDummies: Boolean);
     Procedure CaptureSync;
     Procedure BitMapSync;
@@ -157,14 +162,15 @@ TIsMediaCapture = class(TObject)
     function GetVideoDevice(var AChoose: integer): TVideoCaptureDevice;
     procedure SetComsBitmapHeight(const Value: integer);
     procedure SetComsBitmapWidth(const Value: integer);
+    procedure SetOnSendBitMap(const Value: TSentBitMapEvent);
   protected
     // function GetMediaType: TMediaType; virtual;
     // function GetDeviceProperty(const Prop: TCaptureDevice.TProperty): string; virtual;
     // function GetDeviceState: TCaptureDeviceState; virtual;
     // procedure DoStartCapture; virtual;
     // procedure DoStopCapture; virtual;
-    procedure SendToVideoCommsChannels(AData: TBitmap);Virtual;
-    //For Video Demo Code
+    procedure SendToVideoCommsChannels(AData: TBitmap); Virtual;
+    // For Video Demo Code
   public
     Constructor Create(AComsBmpW, AComsBmpH: integer;
       ASyncReturns, ASyncBitMaps, AForceTestDummies: Boolean);
@@ -186,6 +192,8 @@ TIsMediaCapture = class(TObject)
     Procedure ForceTestVideoDevice;
     Procedure ForceTestAudioDevice;
     Property OnError: TErrorProc read fOnError write fOnError;
+    Property OnSendBitMap: TSentBitMapEvent read FOnSendBitMap
+      write SetOnSendBitMap;
     Property FrontCameraSelect: integer Read FFrontCameraCapture;
     Property RearCameraSelect: integer Read FFrontCameraCapture;
     Property DefaultCameraSelect: integer Read FDefaultCamera;
@@ -243,7 +251,7 @@ Begin
 
   LastMediaError := LastMediaError + #13#10 + Previous;
 
-  ISIndyUtilsException('LogMErr', AError);
+  ISIndyUtilsException('Log Media Error', AError);
 End;
 
 Function CurrentMediaCapture: TIsMediaCapture;
@@ -287,7 +295,7 @@ end;
 function TThreadTxComImage.AddBitMapString(ABitmapString: AnsiString): Boolean;
 begin
   Result := False;
-  if FThreadLock.TryEnter then
+  if FImgTxThrdLock.TryEnter then
     Try
 {$IFDEF Nextgen}
       // if FDataToSend <> nil then
@@ -303,14 +311,16 @@ begin
       FDataToSend := ABitmapString;
       Result := true;
     Finally
-      FThreadLock.Release;
-    End;
+      FImgTxThrdLock.Release;
+    End
+  else
+    Result := False;
 end;
 
 constructor TThreadTxComImage.Create(AOwner: TIsMediaCapture);
 begin
   Inherited Create(true);
-  FThreadLock := TCriticalSection.Create;
+  FImgTxThrdLock := TCriticalSection.Create;
   FOwner := AOwner;
   FLCopyVideoComsChls := FOwner.FVideoComsChannels;
   ISIndyUtilsException(Self, '#TxComThreadOpen ');
@@ -325,7 +335,7 @@ begin
     if FOwner <> nil then
       FOwner.FSendImageThread := nil;
     inherited;
-    FThreadLock.Free;
+    FImgTxThrdLock.Free;
     ISIndyUtilsException(Self, 'TxComThreadClose ');
   Except
     on E: Exception do
@@ -353,7 +363,7 @@ begin
     while not Terminated do
       try
         ImagesSent := 0;
-        FThreadLock.Acquire;
+        FImgTxThrdLock.Acquire;
         try
 {$IFDEF NextGen}
           TxLen := FDataToSend.Length;
@@ -361,7 +371,7 @@ begin
           TxLen := Length(FDataToSend);
 {$ENDIF}
         finally
-          FThreadLock.Release;
+          FImgTxThrdLock.Release;
         end;
         if TxLen < 1 then
         Begin
@@ -379,13 +389,8 @@ begin
           for I := 0 to FLCopyVideoComsChls.count - 1 do
             Try
               if FLCopyVideoComsChls[I] <> nil then
-                if FLCopyVideoComsChls[I].OpenGraphicsChannel then
+                if FLCopyVideoComsChls[I].OutGoingGraphicsRequested then
                 Begin
-{$IFDEF Debug}
-                  if ProgressMsgCount = 1 then
-                    FLCopyVideoComsChls[I].LogAMessage
-                      ('Img Sent ' + FormatDateTime('nn:ss.zz', now));
-{$ENDIF}
 {$IFDEF Android}
                   FLCopyVideoComsChls[I].FullDuplexDispatch(FDataToSend, '');
                   // no wait less of a problem as this is an excusive TX Thread
@@ -398,28 +403,33 @@ begin
                   inc(ImagesSent);
                   FLCopyVideoComsChls[I].CheckChannelGraphicStillOpen;
                 End;
+              if ProgressMsgCount < 0 then
+                if GblLogAllChlOpenClose then
+                  FLCopyVideoComsChls[I].LogAMessage
+                    ('Img Sent ' + FormatDateTime('nn:ss.zz', now));
             Except
               on E: Exception do
                 ISIndyUtilsException(Self, E, '# Execute I=' + IntToStr(I));
             End;
 
-          if ProgressMsgCount > 0 then
-            Dec(ProgressMsgCount)
-          Else
-          Begin
-            ProgressMsgCount := 50;
-            if GblRptSendImages then
-              ISIndyUtilsException(Self,
-                '#SendToVideoCommsChannels(50)::Images sent=' +
-                IntToStr(ImagesSent));
-          End;
-
-          FThreadLock.Acquire;
+          if ImagesSent > 0 then
+            if (ProgressMsgCount > 0) then
+              Dec(ProgressMsgCount)
+            Else
+            Begin
+              ProgressMsgCount := 50;
+              if GblRptSendImages then
+                ISIndyUtilsException(Self,
+                  '#SendToVideoCommsChannels(50)::Images sent=' +
+                  IntToStr(ImagesSent));
+            End;
+          FImgTxThrdLock.Acquire;
           try
             FDataToSend := '';
           finally
-            FThreadLock.Release;
+            FImgTxThrdLock.Release;
           end;
+
           if Not Terminated then
           Begin
             Sleep(100);
@@ -519,16 +529,19 @@ begin
 
   if FNxtPos < Length(FSentMaps) then
     try
-      if FLockObj.TryEnter then
+      if FCaptureLockObj.TryEnter then
         try
           // LogMediaError('TMC.AddSentBitMapCopy::' +
           // IntToStr(Round(ABitmap.Width)));
           FSentMaps[FNxtPos].Assign(ABitmap);
+          if Assigned(FOnSendBitMap) then
+            TThread.Synchronize(nil, AlwaysSyncOnSendBitMap);
+          // TSentBitMapEvent = Procedure(ABitmap:TBitmap; ASentImages:integer) of Object
           inc(FNxtPos);
           if FNxtPos > High(FSentMaps) then
             FNxtPos := 0;
         finally
-          FLockObj.Leave;
+          FCaptureLockObj.Leave;
         end
       else
         LogMediaError('Cannot enter Bitmap copy');
@@ -545,8 +558,9 @@ begin
   Try
     if FVideoComsChannels = nil then
       FVideoComsChannels := TList<TVideoComsChannel>.Create;
-    if AObj=nil then
-        Exit;
+    if AObj = nil then
+      Exit;
+
     AObj.SetManager(Self);
     if FVideoComsChannels.count < 1 then
       I := -1
@@ -580,6 +594,14 @@ begin
   FComsBitmapHeight := Round(AData.Height * SzRefRslt);
   FComsBitmapWidth := Round(AData.Width * SzRefRslt);
   ComsBitMap;
+end;
+
+procedure TIsMediaCapture.AlwaysSyncOnSendBitMap;
+begin
+  if not Assigned(FOnSendBitMap) then
+    ISIndyUtilsException(Self, 'not assigned OnSendBitMap')
+  else
+    FOnSendBitMap(FSentMaps[FNxtPos], FImagesSent);
 end;
 
 procedure TIsMediaCapture.BitMapSync;
@@ -674,7 +696,7 @@ begin
   FInDestroy := False;
   FSyncReturns := ASyncReturns;
   FSyncBitmap := ASyncBitMaps;
-  FLockObj := TCriticalSection.Create;
+  FCaptureLockObj := TCriticalSection.Create;
   FComsBitmapWidth := AComsBmpW;
   FComsBitmapHeight := AComsBmpH;
 {$IFDEF Android}
@@ -726,7 +748,7 @@ begin
 
     try
       SaveANumberOfCommsBitmaps(0);
-      FLockObj.Free;
+      FCaptureLockObj.Free;
       DropAllChannels;
       FreeAndNil(FComsBitMap);
       FreeAndNil(FLastBitmap);
@@ -734,7 +756,7 @@ begin
         Raise Exception.Create('FVideoComsChannels <> nil');
     Except
       on E: Exception do
-        ISIndyUtilsException(Self, E.Message);
+        ISIndyUtilsException(Self, E, 'Destroy');
     End;
     if LocalMediaCaptureDevices = Self then
       LocalMediaCaptureDevices := nil;
@@ -925,7 +947,7 @@ begin
   if AIndex < 1 then
     Exit;
 
-  if FLockObj.TryEnter then
+  if FCaptureLockObj.TryEnter then
     Try
       SzBuffer := Length(FSentMaps);
       if AIndex > SzBuffer then
@@ -936,7 +958,7 @@ begin
 
       Result := FSentMaps[ActualIndex];
     Finally
-      FLockObj.Leave;
+      FCaptureLockObj.Leave;
     End;
 end;
 
@@ -964,7 +986,8 @@ begin
 
     if FCurSynceBitmapBusy then
     begin
-      ErrorMessage('if FCurSynceBitmapBusy then');
+      ISIndyUtilsException(Self,
+        'SampleVideoBufferReady >> if FCurSynceBitmapBusy then');
       Exit;
     end;
 
@@ -984,7 +1007,7 @@ begin
       // if TempErrorCount=2 then
       if (now - ThisTime) > 1 / 24 / 60 / 60 then
       Begin
-        ErrorMessage('SmpBufrRdy Process Time = ' +
+        ISIndyUtilsException(Self, 'SmpBufrRdy Process Time = ' +
           FormatDateTime('yy/mm/dd hh:nn:ss.zzz', now - ThisTime));
         // ISIndyUtilsException(Self, 'SmpBufrRdy Process Time = ' +
         // FormatDateTime('hh:nn:ss.zzz', now - ThisTime));
@@ -997,79 +1020,83 @@ begin
         FormatDateTime('mm dd hh:nn', ThisTime))
     else
     begin
-      FLockObj.Acquire;
-      Try
-        FCurSynceBitmapBusy := true;
+      if FCaptureLockObj.TryEnter then
         Try
+          FCurSynceBitmapBusy := true;
           Try
-            FSyncDev := Sender;
-            FSyncTime := ThisTime;
-            FSyncIndex := idx;
-            if (FBitMaps[idx] <> nil) then
-            begin
-              if FSyncBitmap and IsNotMainThread then
-              Begin
-                TThread.Synchronize(TThread.CurrentThread, BitMapSync);
-                FCurSynceBitmap := FBitMaps[idx];
-                // FBitMaps[idx] updated in BitMapSync
-                // LogMediaError
-                // ('TMC.SampleVideoBufferReady:: 5555555555');
+            Try
+              FSyncDev := Sender;
+              FSyncTime := ThisTime;
+              FSyncIndex := idx;
+              if (FBitMaps[idx] <> nil) then
+              begin
+                if FSyncBitmap and IsNotMainThread then
+                Begin
+                  TThread.Synchronize(TThread.CurrentThread, BitMapSync);
+                  FCurSynceBitmap := FBitMaps[idx];
+                  // FBitMaps[idx] updated in BitMapSync
+                  // LogMediaError
+                  // ('TMC.SampleVideoBufferReady:: 5555555555');
+                End
+                Else
+                  BitMapSync
               End
               Else
-                BitMapSync
-            End
-            Else
-            Begin
-              ISIndyUtilsException(Self, '(FBitMaps[idx]=nil)');
-              FCurSynceBitmap := nil;
-              if FVideoComsChannels <> nil then
-                FCurSynceBitmap := ComsBitMap;
+              Begin
+                ISIndyUtilsException(Self,
+                  'Sample Buffer ready (FBitMaps[idx]=nil)');
+                FCurSynceBitmap := nil;
+                if FVideoComsChannels <> nil then
+                  FCurSynceBitmap := ComsBitMap;
+                if FCurSynceBitmap <> nil then
+                  FVideoDevices[idx].SampleBufferToBitmap
+                    (FCurSynceBitmap, true);
+              end;
+
               if FCurSynceBitmap <> nil then
-                FVideoDevices[idx].SampleBufferToBitmap(FCurSynceBitmap, true);
-            end;
+                SendToVideoCommsChannels(FCurSynceBitmap)
+                // else
+                // ISIndyUtilsException(Self, 'FCurSynceBitmap = nil')
+                  ;
 
-            if FCurSynceBitmap <> nil then
-              SendToVideoCommsChannels(FCurSynceBitmap)
-              // else
-              // ISIndyUtilsException(Self, 'FCurSynceBitmap = nil')
-                ;
-
-            if Assigned(FRetVideoFuncts[idx]) then
-              if FSyncReturns then
-                TThread.Synchronize(TThread.CurrentThread, CaptureSync)
-              else
-                FRetVideoFuncts[idx](TCaptureDevice(Sender), ThisTime);
-          Except
-            On E: Exception do
-            Begin
-              LogMediaError('TMC.SmplRdy::' + E.Message);
-              ISIndyUtilsException(Self, E.Message);
+              if Assigned(FRetVideoFuncts[idx]) then
+                if FSyncReturns then
+                  TThread.Synchronize(TThread.CurrentThread, CaptureSync)
+                else
+                  FRetVideoFuncts[idx](TCaptureDevice(Sender), ThisTime);
+            Except
+              On E: Exception do
+              Begin
+                LogMediaError('TMC.SmplRdy::' + E.Message);
+                ISIndyUtilsException(Self, E.Message);
+              End;
             End;
+            FLockObjectDwell := (now - ThisTime);
+            if FLockObjectDwell > 1 / 24 / 60 / 60 / 2 then
+              If TempErrorCount < 4 then
+              Begin
+                ErrorMessage('SmpBufrRdy Time to Process = ' +
+                  FormatDateTime('hh:nn:ss.zzz', FLockObjectDwell));
+                ErrorMessage('SmpBufrRdy Process At  ' +
+                  FormatDateTime('yy/mm/dd hh:nn:ss.zzz', now) +
+                  ' Time of Sample =' + FormatDateTime('yy/mm/dd hh:nn:ss.zzz',
+                  ThisTime) + crlf + ' Last Synced at ' +
+                  FormatDateTime('yy/mm/dd hh:nn:ss.zzz', LastSync) +
+                  'Raw Media Time =' + IntToStr(ATime));
+                inc(TempErrorCount);
+              End;
+          Finally
+            FCurSynceBitmapBusy := False;
           End;
-          FLockObjectDwell := (now - ThisTime);
-          if FLockObjectDwell > 1 / 24 / 60 / 60 / 2 then
-            If TempErrorCount < 4 then
-            Begin
-              ErrorMessage('SmpBufrRdy Time to Process = ' +
-                FormatDateTime('hh:nn:ss.zzz', FLockObjectDwell));
-              ErrorMessage('SmpBufrRdy Process At  ' +
-                FormatDateTime('yy/mm/dd hh:nn:ss.zzz', now) +
-                ' Time of Sample =' + FormatDateTime('yy/mm/dd hh:nn:ss.zzz',
-                ThisTime) + crlf + ' Last Synced at ' +
-                FormatDateTime('yy/mm/dd hh:nn:ss.zzz', LastSync) +
-                'Raw Media Time =' + IntToStr(ATime));
-              inc(TempErrorCount);
-            End;
         Finally
-          FCurSynceBitmapBusy := False;
-        End;
-      Finally
-        FLockObj.Release;
-      End;
+          FCaptureLockObj.Leave;
+        End
+      Else
+        ISIndyUtilsException(Self, '# SampleVideoBufferReady no lock');;
     end;
   Except
     On E: Exception do
-      ISIndyUtilsException(Self, E.Message);
+      ISIndyUtilsException(Self, E, ' # SampleVideoBufferReady');
   End;
 end;
 
@@ -1081,7 +1108,7 @@ begin
     CurSz := Length(FSentMaps);
     if ANumberToSave = CurSz then
       Exit
-    else if FLockObj.TryEnter then
+    else if FCaptureLockObj.TryEnter then
       Try
         FNxtPos := 0;
         if ANumberToSave < CurSz then
@@ -1097,7 +1124,7 @@ begin
             FSentMaps[Nxt] := TBitmap.Create;
         End;
       Finally
-        FLockObj.Leave;
+        FCaptureLockObj.Leave;
       End;
   Except
     on E: Exception do
@@ -1135,7 +1162,7 @@ begin
       end;
 
     if (FSendImageThread <> nil) then
-      if FLockObj.TryEnter then
+      if FCaptureLockObj.TryEnter then
         Try
           if AData <> ComsBitMap then
             if (AData.Height = FComsBitmapHeight) and
@@ -1163,14 +1190,13 @@ begin
             AddSentBitMapCopy(FComsBitMap);
           FLastVideoComms := now;
         Finally
-          // FImagesSent := ImagesSent;
-          FLockObj.Leave;
+          FCaptureLockObj.Leave;
         End
       Else if GblRptSendImages then
-        LogMediaError('SendToVideoCommsChannels Busy');
+        ISIndyUtilsException(Self, 'SendToVideoCommsChannels Busy');
   Except
     On E: Exception do
-      LogMediaError('SendToVideoCommsChannels>' + E.Message)
+      ISIndyUtilsException(Self, E, 'SendToVideoCommsChannels');
   End;
 End;
 
@@ -1210,6 +1236,13 @@ begin
 
   FreeAndNil(FComsBitMap);
   FComsBitmapWidth := Value;
+end;
+
+procedure TIsMediaCapture.SetOnSendBitMap(const Value: TSentBitMapEvent);
+begin
+  FOnSendBitMap := Value;
+  if Assigned(FOnSendBitMap) and (Length(FSentMaps) < 1) then
+    SaveANumberOfCommsBitmaps(1);
 end;
 
 procedure TIsMediaCapture.SetVideoReturn(AReturn: TIsCaptureProc;
@@ -1280,7 +1313,7 @@ begin
       TIsCaptureDeviceAudioTst(FDevice).DoThreadRun;
   Except
     on E: Exception do
-      ISIndyUtilsException(Self, E.Message);
+      ISIndyUtilsException(Self, E, 'TIsCaptureTstThread.Execute');
   End;
 end;
 
@@ -1290,10 +1323,12 @@ constructor TIsCaptureDeviceVideoTst.Create(const AManager
   : TCaptureDeviceManager; const ADefault: Boolean);
 begin
   Try
+    if AManager <> nil then
+      ISIndyUtilsException(Self, 'AManager<>nil in create');
     inc(GblTstDevices);
   Except
     on E: Exception do
-      ISIndyUtilsException(Self, E.Message);
+      ISIndyUtilsException(Self, E, 'TIsCaptureDeviceVideoTst.Create');
   End;
   inherited;
 end;
@@ -1301,8 +1336,8 @@ end;
 destructor TIsCaptureDeviceVideoTst.Destroy;
 begin
   Try
-    FreeAndNil(FBitmap);
     FreeAndNil(fRunThread);
+    FreeAndNil(FBitmap);
     Dec(GblTstDevices);
   Except
     on E: Exception do
@@ -1357,8 +1392,11 @@ begin
         (Rect.Width > 20) do
       begin
         Canvas := FBitmap.Canvas;
-        TIsGraphics.DrawElipse(Rect, Canvas, TAlphaColorRec.red, 10,
-          0.9, False);
+        if Canvas <> nil then
+        begin
+          TIsGraphics.DrawElipse(Rect, Canvas, TAlphaColorRec.red, 10,
+            0.9, False);
+        end;
         // Sleep(1000); one per second
         Sleep(50); // ten per second ??
         IntTime := Round(now * MediaTimeScale * SecsPerDay);
@@ -1371,11 +1409,11 @@ begin
     Except
       On E: Exception do
       Begin
-        ISIndyUtilsException(self,E,'TIsCaptureDeviceVideoTst.DoThreadRun');
+        ISIndyUtilsException(Self, E, 'TIsCaptureDeviceVideoTst.DoThreadRun');
         fRunThread.Terminate;
       End;
     End;
-  ISIndyUtilsException(self,'TIsCaptureDeviceVideoTst.DoThreadRun:: 66666');
+  ISIndyUtilsException(Self, 'TIsCaptureDeviceVideoTst.DoThreadRun:: 66666');
   FreeAndNil(FBitmap);
 end;
 

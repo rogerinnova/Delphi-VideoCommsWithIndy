@@ -18,6 +18,12 @@
         <Projects Include="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\TCPClientDemoApp.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\FMXDummyImagesForAppSrvr.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\ConsoleAppDemoService.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -71,14 +77,32 @@
     <Target Name="TCPClientDemoApp:Make">
         <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\TCPClientDemoApp.dproj" Targets="Make"/>
     </Target>
+    <Target Name="FMXDummyImagesForAppSrvr">
+        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\FMXDummyImagesForAppSrvr.dproj"/>
+    </Target>
+    <Target Name="FMXDummyImagesForAppSrvr:Clean">
+        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\FMXDummyImagesForAppSrvr.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="FMXDummyImagesForAppSrvr:Make">
+        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\FMXDummyImagesForAppSrvr.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="ConsoleAppDemoService">
+        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\ConsoleAppDemoService.dproj"/>
+    </Target>
+    <Target Name="ConsoleAppDemoService:Clean">
+        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\ConsoleAppDemoService.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="ConsoleAppDemoService:Make">
+        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\ConsoleAppDemoService.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="VclImageDemo;FMXImageDemo;VCLApplicationSrver;TCPApplicationsDemoService;TCPClientDemoApp"/>
+        <CallTarget Targets="VclImageDemo;FMXImageDemo;VCLApplicationSrver;TCPApplicationsDemoService;TCPClientDemoApp;FMXDummyImagesForAppSrvr;ConsoleAppDemoService"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="VclImageDemo:Clean;FMXImageDemo:Clean;VCLApplicationSrver:Clean;TCPApplicationsDemoService:Clean;TCPClientDemoApp:Clean"/>
+        <CallTarget Targets="VclImageDemo:Clean;FMXImageDemo:Clean;VCLApplicationSrver:Clean;TCPApplicationsDemoService:Clean;TCPClientDemoApp:Clean;FMXDummyImagesForAppSrvr:Clean;ConsoleAppDemoService:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="VclImageDemo:Make;FMXImageDemo:Make;VCLApplicationSrver:Make;TCPApplicationsDemoService:Make;TCPClientDemoApp:Make"/>
+        <CallTarget Targets="VclImageDemo:Make;FMXImageDemo:Make;VCLApplicationSrver:Make;TCPApplicationsDemoService:Make;TCPClientDemoApp:Make;FMXDummyImagesForAppSrvr:Make;ConsoleAppDemoService:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

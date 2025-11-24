@@ -18,6 +18,7 @@ uses
 {$ENDIF}
   IdContext, inifiles, IdTCPConnection, IdGlobal, IdYarn,
   IdBaseComponent, IdComponent, IdCustomTCPServer, IdTCPServer, ISStrUtl,
+  IsArrayLib,
 {$IFDEF Nextgen}
   IsNextGenPickup,
 {$ENDIF}
@@ -67,11 +68,14 @@ type
     FRegisteredAs: AnsiString;
     FOnSimpleRemoteAction: TComandActionAnsi;
     FOnStringAction: TComandActionString;
+    FLockSession: TCriticalSection;
     function ShowServerDetails: AnsiString;
     function ShowServerConnections(ARegData: AnsiString): AnsiString;
     function SetServerConnections(AConnectData: AnsiString): AnsiString;
     // Link to Advertised - cServerLink
-    //Start new followon  - cNewIPLink
+    // Start new followon  - cNewIPLink
+    Procedure SetFullDuplex(Val: Boolean); override;
+    Procedure ClearReferences;
     Function ResetServer(AConnectData: AnsiString): AnsiString;
     function DropCoupledSession: AnsiString;
   protected
@@ -96,6 +100,7 @@ type
     // function PackAPutServerFileResponse(const AFileData: AnsiString)
     // : AnsiString;
     function ConnectionStatusText: AnsiString;
+    function LinkedTo(APort, BPort: Integer): Integer;
     function TextID: String; override;
     Procedure DropSrvrReferences;
     Procedure LogAMessage(AMessage: String); override;
@@ -114,6 +119,8 @@ type
     FTcpRef: TISIndyTCPSvrSession;
     FDestroying: Boolean;
     Function RawTcpRef: TISIndyTCPSvrSession;
+  Protected
+    function Run: Boolean; override;
   Public
     constructor Create(AConnection: TIdTCPConnection; AYarn: TIdYarn;
       AList: TIdContextThreadList = nil); override;
@@ -142,6 +149,9 @@ type
     fIdleTimePermitted: TDateTime;
     FResetStartTime: TDateTime; // if > now then reset/reject calls;
     function GetMaxCallsPerMinute: Integer;
+    function GetSessionByCallingPort(APeerPortNo: Integer)
+      : TISIndyTCPSvrSession;
+    // Find ASession on the server given the calling port
     Function ListOfRegConnections: TStringList;
     Function LocalContext(AContext: TIdContext): TIsIndyTCPServerContext;
     Function ResetSvr(AData: AnsiString): AnsiString;
@@ -165,8 +175,13 @@ type
     Constructor Create(AOwner: TComponent);
     Destructor Destroy; override;
     Function ServerDetailsAsText: AnsiString;
+    Function AllConnectionsAsText: AnsiString;
     Function AllRegisteredConnections(AConnection: TISIndyTCPSvrSession)
       : AnsiString;
+    Function RemotePortRegAsString(ARegNo: Integer; AConnectNo: Integer = -1)
+      : AnsiString;
+    Function LinkStatusAsResponse(ACommand: AnsiString;
+      ASession: TISIndyTCPSvrSession): AnsiString;
     Function GetRegConnectionFor(ARegString: AnsiString): TISIndyTCPBase;
     function ReadLogMessage: String;
     Function CurrentAddresses: TStringList;
@@ -334,6 +349,60 @@ begin
   Finally
     FListLock.Release;
   end;
+end;
+
+function TIsIndyApplicationServer.AllConnectionsAsText: AnsiString;
+Var
+  i: Integer;
+  Obj: TISIndyTCPSvrSession;
+begin
+  Try
+    if fCurrentSessionObjects = nil then
+      Result := 'No Current Sessions' + #10#13
+    Else
+    begin
+      Result := IntToStr(fCurrentSessionObjects.Count) +
+        ' Current Sessions' + #10#13;
+      for i := 0 to fCurrentSessionObjects.Count - 1 do
+      Begin
+        if TObject(fCurrentSessionObjects[i]) is TISIndyTCPSvrSession then
+          Obj := TISIndyTCPSvrSession(fCurrentSessionObjects[i])
+        else
+          Obj := nil;
+        if Obj <> nil then
+          if Obj.FCoupledSession <> nil then
+            Result := Result + Obj.TextID + ' is linked' + #10#13
+          else
+            Result := Result + Obj.TextID + #10#13;
+      end;
+    end;
+    if FListOfRegConnections = nil then
+      Result := Result + 'No Advertised Sessions' + #10#13
+    Else
+    begin
+      Result := Result + IntToStr(FListOfRegConnections.Count) +
+        ' Advertised Sessions' + #10#13;
+      for i := 0 to FListOfRegConnections.Count - 1 do
+      Begin
+        if FListOfRegConnections.Objects[i] is TISIndyTCPSvrSession then
+          Obj := TISIndyTCPSvrSession(FListOfRegConnections.Objects[i])
+        else
+          Obj := nil;
+        if Obj = nil then
+          Result := Result + FListOfRegConnections[i] + ' == ' +
+            Obj.TextID + #10#13
+        else if Obj.FCoupledSession <> nil then
+          Result := Result + FListOfRegConnections[i] + ' == ' + Obj.TextID +
+            ' is linked' + #10#13
+        else
+          Result := Result + FListOfRegConnections[i] + ' == ' +
+            Obj.TextID + #10#13;
+      end;
+    end;
+  Except
+    On E: Exception do
+      Result := Result + #10#13 + 'Exception::' + E.Message;
+  End;
 end;
 
 function TIsIndyApplicationServer.AllRegisteredConnections
@@ -619,7 +688,9 @@ begin
     FLogList.Free;
     FListLock.Free;
     FBusyLock.Free;
-    fCurrentAddresses.Free;
+    fCurrentAddresses.Free; // Owns Objects;
+    // FreeSListWObjects(fCurrentAddresses);
+    // fCurrentAddresses:=nil;
   except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'TIsIndyApplicationServer.Destroy');
@@ -662,31 +733,57 @@ begin
     AddLogMessage('Server', 'TIsIndyApplicationServer.DropRegConnection');
   If FListOfRegConnections = nil Then
     Exit;
-  if AConnection = nil then
-    Exit;
-
-  Index := FListOfRegConnections.IndexOfObject(AConnection);
-  if Index >= 0 then
-    FListOfRegConnections.Delete(Index);
+  FListLock.Acquire;
+  Try
+    Index := FListOfRegConnections.IndexOfObject(AConnection);
+    if Index >= 0 then
+      FListOfRegConnections.Delete(Index);
+  Finally
+    FListLock.Release;
+  end;
 end;
 
 procedure TIsIndyApplicationServer.DropSession(ASession: TISIndyTCPSvrSession);
 Var
   Idx: Integer;
 begin
-  DropRegConnection(ASession);
-  Dec(FServerTcpSessions);
-  if fCurrentSessionObjects = nil then
-    Exit;
-  FListLock.Acquire;
   Try
-    Idx := fCurrentSessionObjects.IndexOf(ASession);
-    if Idx < 0 then
-      Exit
-    else
-      fCurrentSessionObjects.Delete(Idx);
-  Finally
-    FListLock.Release;
+    if ASession.FServerObject = Self then
+      ASession.FServerObject := nil;
+
+    FListLock.Acquire;
+    Try
+      DropRegConnection(ASession);
+      Dec(FServerTcpSessions);
+      if fCurrentSessionObjects = nil then
+        Exit;
+      if fCurrentSessionObjects = nil then
+        Idx := -1
+      Else
+        Idx := fCurrentSessionObjects.IndexOf(ASession);
+      if Idx < 0 then
+        ISIndyUtilsException(Self, 'Session not found')
+      else
+      begin
+        fCurrentSessionObjects[Idx] := nil;
+        fCurrentSessionObjects.Delete(Idx);
+      end;
+      if FListOfRegConnections = nil then
+        Idx := -1
+      Else
+        Idx := FListOfRegConnections.IndexOfObject(ASession);
+      if Idx < 0 then
+      else
+      begin
+        FListOfRegConnections.Objects[Idx] := nil;
+        FListOfRegConnections.Delete(Idx);
+      end;
+    Finally
+      FListLock.Release;
+    end;
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, ' Drop Session');
   end;
 end;
 
@@ -707,6 +804,37 @@ begin
   Except
     Result := nil;
   end;
+end;
+
+function TIsIndyApplicationServer.GetSessionByCallingPort(APeerPortNo: Integer)
+  : TISIndyTCPSvrSession;
+Var
+  i: Integer;
+  Obj: TObject;
+  ThisObj: TISIndyTCPSvrSession;
+begin
+  Result := nil;
+  if APeerPortNo < 1 then
+    Exit;
+  if fCurrentSessionObjects = nil then
+    Exit;
+  i := 0;
+  if FListLock.TryEnter then
+    try
+      while (i < fCurrentSessionObjects.Count) and (Result = nil) do
+      begin
+        Obj := fCurrentSessionObjects[i];
+        if Obj is TISIndyTCPSvrSession then
+        Begin
+          ThisObj := TISIndyTCPSvrSession(Obj);
+          if ThisObj.Port = APeerPortNo then
+            Result := ThisObj;
+        end;
+        Inc(i);
+      end;
+    finally
+      FListLock.Leave;
+    end;
 end;
 
 procedure TIsIndyApplicationServer.IsIdTCPSvrSessionExecute
@@ -765,7 +893,7 @@ begin
             if GblLogAllChlOpenClose then
             begin
               AddLogMessage(TcpCtx.TextID, 'End Context Run Channel');
-              ISIndyUtilsException(Self, '#Failed TcpCtx.ProcessNextTransaction');
+              ISIndyUtilsException(Self, TcpCtx.TextID + '# End Session');
             end;
             TcpCtx.CloseGracefully;
             Sleep(1000);
@@ -778,9 +906,14 @@ begin
         AddLogMessage('Server IsIdTCPSvrSessionExecute Ex:', E.Message);
         if TcpCtx <> nil then
           TcpCtx.LogAMessage('Execute Error:' + E.Message);
-        if LContext.Connection <> nil then
-          if LContext.Connection.Connected then
-            AContext.Connection.Disconnect;
+        if LConnection <> nil then
+        begin
+          If LConnection.IOHandler <> nil then
+            LConnection.IOHandler.CloseGracefully;
+        end
+        else if LContext.Connection <> nil then
+          if LContext.Connection.IOHandler <> nil then
+            LContext.Connection.IOHandler.CloseGracefully;
       Except
         On ee: Exception do
         Begin
@@ -844,11 +977,175 @@ begin
   end;
 end;
 
-// procedure TIsIndyApplicationServer.IsIdTCPSrvrContextCreated
-// (AContext: TIdContext);
-// begin
-// Inc(GlobalContextCount);
-// end;
+function TIsIndyApplicationServer.LinkStatusAsResponse(ACommand: AnsiString;
+  ASession: TISIndyTCPSvrSession): AnsiString;
+{ sub } Function CoupledTogether(AThis, AThat: TISIndyTCPSvrSession): Boolean;
+  begin
+    Result := false;
+    if AThis = AThat then
+      Exit;
+    if AThis = nil then
+      Exit;
+    if AThat = nil then
+      Exit;
+    if AThis.FCoupledSession = nil then
+      If AThat.FCoupledSession = AThis then
+        ISIndyUtilsException(Self, 'AThis Not Coupled ' + AThis.TextID + '<>' +
+          AThat.TextID)
+      else
+        Exit;
+
+    if AThat.FCoupledSession = nil then
+      If AThis.FCoupledSession = AThis then
+        ISIndyUtilsException(Self, 'AThat Not Coupled ' + AThis.TextID + '<>' +
+          AThat.TextID)
+      else
+        Exit;
+
+    if AThis.FCoupledSession = AThat then
+      if AThat.FCoupledSession = AThis then
+        Result := True
+      else
+        ISIndyUtilsException(Self, 'Not CoupledTogether ' + AThis.TextID + '<>'
+          + AThat.TextID);
+  end;
+
+Var
+  Linked, AllOk, BothCoupled, Together: Boolean;
+  ThisPort, ThatPort: Integer;
+  RegObj, ThisPortObj, ThatPortObj: TISIndyTCPSvrSession;
+  LinkToReg: AnsiString;
+  Ary: TArrayOfAnsiStrings;
+  LenAry, i, ThisSessionIdx, ThisRegIdx: Integer;
+begin
+  Try
+    Result := cIsLinkedOnServer + 'CE#'; // CoupleError
+
+    if Pos(cIsLinkedOnServer, ACommand) <> 1 then
+      Exit
+    Else
+    Begin
+      Ary := GetAnsiArrayFromString(ACommand, '#', false, false, false);
+      // cIsLinkedOnServer(0),ThisPort(1),ThatPort(2),Ref(3) after # in Refr
+      LenAry := Length(Ary);
+      Case LenAry of
+        0:
+          Exit;
+        1:
+          Begin
+            if ASession <> nil then
+              if ASession.FCoupledSession = nil then
+                Result := cIsLinkedOnServer + 'CN#' // NullCouple,
+              else if ASession.FCoupledSession.FCoupledSession = nil then
+              begin
+                Result := cIsLinkedOnServer + 'CE#'; // CoupleError
+                ISIndyUtilsException(Self, 'Single Couple error::' +
+                  ASession.TextID + '::Reg=' + ASession.FRegisteredAs);
+              end
+              Else if ASession.FCoupledSession.FCoupledSession = ASession then
+                Result := cIsLinkedOnServer + 'CK#';
+            Exit;
+          End;
+        2, 3:
+          Begin
+            ThisPort := StrToIntDef(Ary[1], 0);
+            if LenAry < 3 then
+              ThatPort := 0
+            else
+              ThatPort := StrToIntDef(Ary[2], 0);
+            LinkToReg := '';
+          end;
+        4, 5, 6, 7, 8, 9: // allows for '#' in link reg
+          Begin
+            ThisPort := StrToIntDef(Ary[1], 0);
+            ThatPort := StrToIntDef(Ary[2], 0);
+            LinkToReg := Ary[3];
+            i := 4;
+            while i < LenAry do
+            begin
+              LinkToReg := LinkToReg + '#' + Ary[i];
+              Inc(i);
+            end;
+          end;
+      end;
+
+      ThisSessionIdx := -1;
+      if ASession <> nil then
+        if fCurrentSessionObjects = nil then
+          ISIndyUtilsException(Self, 'Session Connected =' + ASession.TextID +
+            ' but no fCurrentSessionObjects')
+        Else
+          ThisSessionIdx := fCurrentSessionObjects.IndexOf(ASession);
+
+      ThisRegIdx := -1;
+      if FListOfRegConnections <> nil then
+        if LinkToReg <> '' then
+          ThisRegIdx := FListOfRegConnections.IndexOf(LinkToReg);
+
+      RegObj := nil;
+      if ThisRegIdx < 0 then
+      else if FListOfRegConnections.Objects[ThisRegIdx] is TISIndyTCPSvrSession
+      then
+        RegObj := TISIndyTCPSvrSession(FListOfRegConnections.Objects
+          [ThisRegIdx]);
+
+      ThisPortObj := GetSessionByCallingPort(ThisPort);
+      ThatPortObj := GetSessionByCallingPort(ThatPort);
+      // (CoupleError,NullCouple,ThisPortExists,ThatPortExists,ThisPortCoupled,ThatPortCoupled,BothCoupled,CoupledTogether,CoupleLinkOK);
+      Result := cIsLinkedOnServer + 'CE#';
+      if RegObj = nil then
+      begin
+        if CoupledTogether(ThisPortObj, ThatPortObj) then
+          Result := cIsLinkedOnServer + 'CT#'
+        else
+        begin
+          if ThisPortObj <> nil then
+          Begin
+            Result := cIsLinkedOnServer + 'NI#'; // ThisPortExists
+            if ThisPortObj.FCoupledSession <> nil then
+              Result := cIsLinkedOnServer + 'CI#'; // ThisPortCoupled
+            if ThatPortObj = nil then
+              Exit;
+            if ThatPortObj.FCoupledSession <> nil then
+              if ThatPortObj = ThisPortObj then
+                Exit
+              else if ThisPortObj.FCoupledSession <> nil then
+                Result := cIsLinkedOnServer + 'CB#' // BothCoupled
+              Else
+                Result := cIsLinkedOnServer + 'CA#'; // ThatPortCoupled
+          end
+          else if ThatPortObj <> nil then
+            if ThatPortObj.FCoupledSession <> nil then
+              Result := cIsLinkedOnServer + 'CA#' // ThatPortCoupled
+            Else
+              Result := cIsLinkedOnServer + 'NA#'; // ThatPortExists
+        end
+      end
+      else
+      Begin
+        // (CoupleError,RegButNoLinks,NullCouple,ThisPortExists,ThatPortExists,ThisPortCoupled,ThatPortCoupled,BothCoupled,CoupledTogether,CoupleLinkOK);
+        Case RegObj.LinkedTo(ThisPort, ThatPort) of
+          0:
+            Result := cIsLinkedOnServer + 'RO#'; // RegButNoLinks
+          5, 6:
+            Result := cIsLinkedOnServer + 'CO#'; // CoupleLinkOK
+          1, 2:
+            Result := cIsLinkedOnServer + 'RO#'; // RegButNoLinks
+          3:
+            Result := cIsLinkedOnServer + 'CI#'; // ThisPortCoupled
+          4:
+            Result := cIsLinkedOnServer + 'CA#'; // ThatPortCoupled
+        end;
+      end
+    end;
+  Except
+    On E: Exception do
+    begin
+      ISIndyUtilsException(Self, E, 'LinkStatusAsResponse');
+      Result := cIsLinkedOnServer + 'CE#'; // CoupledError
+    end;
+  end;
+end;
 
 function TIsIndyApplicationServer.ListOfRegConnections: TStringList;
 begin
@@ -921,6 +1218,53 @@ begin
   CloseInactiveSessions;
 end;
 
+function TIsIndyApplicationServer.RemotePortRegAsString(ARegNo,
+  AConnectNo: Integer): AnsiString;
+Var
+  RegOb, ConnectObj: TISIndyTCPSvrSession;
+  No1, No2: Integer;
+  RegNam: AnsiString;
+begin
+  RegOb := nil;
+  ConnectObj := nil;
+  Result := '##';
+  No1 := 0;
+  No2 := 0;
+  try
+    if fCurrentSessionObjects = nil then
+      Exit; // No Connections
+
+    If (FListOfRegConnections <> nil) and (ARegNo > -1) and
+      (ARegNo < FListOfRegConnections.Count) then
+      if FListOfRegConnections.Objects[ARegNo] is TISIndyTCPSvrSession then
+        RegOb := TISIndyTCPSvrSession(FListOfRegConnections.Objects[ARegNo]);
+
+    if AConnectNo >= fCurrentSessionObjects.Count then
+      AConnectNo := fCurrentSessionObjects.Count - 1;
+    if (AConnectNo > -1) then
+      if TObject(fCurrentSessionObjects[AConnectNo]) is TISIndyTCPSvrSession
+      then
+        ConnectObj := fCurrentSessionObjects[AConnectNo];
+
+    if (ConnectObj = nil) and (RegOb <> nil) then
+      ConnectObj := RegOb.FCoupledSession as TISIndyTCPSvrSession;
+
+    if (ConnectObj <> nil) then
+      No2 := ConnectObj.Port;
+    if (RegOb <> nil) then
+    Begin
+      No1 := RegOb.Port;
+      RegNam := RegOb.FRegisteredAs;
+    end;
+    if No1 = No2 then
+      Inc(No2);
+    Result := IntToStr(No1) + '#' + IntToStr(No2) + '#' + RegNam;
+  except
+    on E: Exception do
+      ISIndyUtilsException(Self, E, 'RemotePortAsString');
+  end;
+end;
+
 function TIsIndyApplicationServer.ResetSvr(AData: AnsiString): AnsiString;
 Var
   RestartSrvAtTime: TDateTime;
@@ -977,6 +1321,8 @@ begin
     IntToStr(GlobalContextCount) + #13#10;
   Result := Result + 'Current Server TCP Objects =' +
     IntToStr(FServerTcpSessions) + #13#10;
+  Result := Result + #13#10 + 'Connection Details' + #13#10 +
+    AllConnectionsAsText;
 end;
 
 procedure TIsIndyApplicationServer.SetMaxCallsperminute(AValue: Integer);
@@ -1016,9 +1362,9 @@ destructor TIsIndyTCPServerContext.Destroy;
 Var
   s: String;
 begin
+  FDestroying := True;
   try
     Dec(GlobalContextCount);
-    FDestroying := True;
     if GblLogAllChlOpenClose then
     begin
       s := CtxTextId;
@@ -1065,11 +1411,12 @@ end;
 
 function TIsIndyTCPServerContext.RawTcpRef: TISIndyTCPSvrSession;
 begin
-  Result := FTcpRef;
+  Result := nil;
   if FDestroying then
     Exit;
-  if Result = nil then
+  if FTcpRef = nil then
     Exit;
+  Result := FTcpRef;
 
   If FTcpRef.TcpConnection = nil then
     If FTcpRef.FServerConnext = Self then
@@ -1082,7 +1429,7 @@ begin
       if (FTcpRef.IOHandler <> Connection.IOHandler) then
         raise Exception.Create('Error FTcpRef.FServerConnext <> Self');
     end
-    Else
+    Else If FTcpRef.FServerConnext <> nil then
       raise Exception.Create('Error FTcpRef.IOHandler<>Connection.IOHandler');
 end;
 
@@ -1099,6 +1446,13 @@ begin
     On E: Exception do
       ISIndyUtilsException(Self, E, '#ReleaseOldRef');
   End;
+end;
+
+function TIsIndyTCPServerContext.Run: Boolean;
+begin
+  Result := inherited Run;
+  if FDestroying then
+    Result := false;
 end;
 
 { TISIndyTCPSvr }
@@ -1200,6 +1554,35 @@ begin
     FDecWriteCount := 1000;
 end;
 
+procedure TISIndyTCPSvrSession.ClearReferences;
+begin
+  if FServerObject is TIsIndyApplicationServer then
+    TIsIndyApplicationServer(FServerObject).DropSession(Self);
+  if FServerObject <> nil then
+    ISIndyUtilsException(Self, 'Server not deleted in drop session');
+
+  try
+    if FServerConnext <> nil then
+      if FServerConnext.FTcpRef = Self then
+      begin
+        FServerConnext.FDestroying := True;
+        // FServerConnext.FTcpRef := nil;
+      end;
+
+    if FCoupledSession <> nil then
+    Begin
+      if FOwnsCoupledSession then
+        FreeAndNil(FCoupledSession)
+      else
+        FCoupledSession.FCoupledSession := nil;
+    End;
+    FCoupledSession := nil;
+  except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'TISIndyTCPSvrSession.Destroy');
+  end;
+end;
+
 function TISIndyTCPSvrSession.ConnectionStatusText: AnsiString;
 begin
   Result := 'No Register Name';
@@ -1221,48 +1604,12 @@ begin
 end;
 
 destructor TISIndyTCPSvrSession.Destroy;
-Var
-  Srv: TIsIndyApplicationServer;
 begin
-  if FServerObject is TIsIndyApplicationServer then
-    TIsIndyApplicationServer(FServerObject).DropSession(Self);
-  Srv := nil;
   try
-    if FServerConnext <> nil then
-      if FServerConnext.FTcpRef = Self then
-        FServerConnext.FTcpRef := nil;
-    Try
-      if FServerObject is TIsIndyApplicationServer then
-      Begin
-        if GblLogAllChlOpenClose then
-          LogAMessage('Svr Session Destroy');
-        Srv := TIsIndyApplicationServer(FServerObject);
-        Srv.DropSession(Self);
-        // Srv.DropRegConnection(Self); Put in Drop session
-      End
-      else
-        Srv := nil;
-
-      if FCoupledSession <> nil then
-      Begin
-        if FOwnsCoupledSession then
-          FreeAndNil(FCoupledSession)
-        else
-          FCoupledSession.FCoupledSession := nil;
-      End;
-      FCoupledSession := nil;
-    except
-      On E: Exception do
-      begin
-        ISIndyUtilsException(Self, E, 'TISIndyTCPSvrSession.Destroy');
-        if Srv <> nil then
-          Srv.AddLogMessage('SnEnd', E.Message);
-      end;
-    end;
+    ClearReferences;
+    FreeAndNil(FLockSession);
   finally
     inherited;
-    // if Srv <> nil then
-    // Dec(Srv.FServerTcpSessions)   See above
   end;
 end;
 
@@ -1457,26 +1804,48 @@ end;
 
 function TISIndyTCPSvrSession.DoSimpleRemoteAction(ACommand: AnsiString)
   : AnsiString;
-var
-{$IFDEF NextGen}
-  SnapName: string;
-{$ELSE}
-  SnapName: AnsiString;
-{$ENDIF}
 begin
   Result := '';
-  SnapName := '';
-
   if Pos(cRemoteServerDetails, ACommand) = 1 then
     Result := ShowServerDetails
   else if Pos(cRemoteServerConnections, ACommand) = 1 then
     Result := ShowServerConnections(ACommand)
   else if Pos(cRemoteServerDropCoupledSession, ACommand) = 1 then
     Result := DropCoupledSession
+  else if Pos(cIsLinkedOnServer, ACommand) = 1 then
+  begin
+    if FServerObject is TIsIndyApplicationServer then
+      Result := TIsIndyApplicationServer(FServerObject)
+        .LinkStatusAsResponse(ACommand, Self)
+    else
+      Result := '-33333';
+  End
+  else if Pos(cIdleSecsOnServer, ACommand) = 1 then
+  begin
+    if FServerObject is TIsIndyApplicationServer then
+      Result := IntToStr(Round(TIsIndyApplicationServer(FServerObject)
+        .fIdleTimePermitted * 24 * 60 * 60))
+    else
+      Result := '-5555';
+  End
+  { Any command that acts on this server must go before
+    Assigned(FCoupledSession)
+  }
   else if Assigned(FCoupledSession) then
-    FCoupledSession.FullDuplexDispatch(ACommand, cSimpleRemoteAction)
+  Begin
+    if FCoupledSession.FCoupledSession = nil then
+      ISIndyUtilsException(Self, 'Id=' + TextID + 'Reg=' + FRegisteredAs +
+        '   FCoupledSession.FCoupledSession=nil Id:=' + FCoupledSession.TextID +
+        ' Reg=' + TISIndyTCPSvrSession(FCoupledSession).FRegisteredAs)
+    else
+      ISIndyUtilsException(Self, 'Id=' + TextID + 'Reg=' + FRegisteredAs +
+        '  FCoupledSession has FCoupledSession ID=' + FCoupledSession.TextID +
+        ' Reg=' + FRegisteredAs);
+
+    FCoupledSession.FullDuplexDispatch(ACommand, cSimpleRemoteAction);
     // else if Pos(cRemoteServerDetails, ACommand) = 1 then
     // Result := ShowServerDetails
+  end
   else if Pos(cRemoteSetServerRelay, ACommand) = 1 then
     Result := SetServerConnections(ACommand)
   else if Pos(cRemoteResetServer, ACommand) = 1 then
@@ -1497,8 +1866,8 @@ begin
     Result := FOnSimpleRemoteAction(ACommand, Self)
   else
   Begin
-    ISIndyUtilsException(Self, 'Sim Rmt: No Code For Action :' + ACommand);
-    raise Exception.Create('No Code For Action::' + ACommand);
+    ISIndyUtilsException(Self, 'Simple Rmt: No Code For Action :' + ACommand);
+    Result := 'No Code For Action::' + ACommand;
   End;
 end;
 
@@ -1517,6 +1886,7 @@ begin
         Else
           FCoupledSession.FCoupledSession := nil;
       Result := 'DropCoupledSession';
+      fFullDuplex := false;
     End
     Else
     Begin
@@ -1556,6 +1926,40 @@ begin
     if GblRptTimeoutClear then
       ISIndyUtilsException(Self, '# Idle Close ' + TextID);
     CloseGracefully;
+  end;
+end;
+
+function TISIndyTCPSvrSession.LinkedTo(APort, BPort: Integer): Integer;
+begin
+  Result := 0;
+  if Port <> 0 then
+    if (APort = Port) then
+      Result := 1
+    else if (BPort = Port) then
+      Result := 2;
+
+  if FCoupledSession <> nil then
+  begin
+    if FCoupledSession.Port = APort then
+      case Result of
+        0:
+          Result := 3; // APort is couple
+        1:
+          ISIndyUtilsException(Self, 'Session Link Error A Both =' +
+            IntToStr(APort));
+        2:
+          Result := 6; // full match
+      end
+    else if FCoupledSession.Port = BPort then
+      case Result of
+        0:
+          Result := 4; // BPort is couple
+        1:
+          Result := 5; // reverse match
+        2:
+          ISIndyUtilsException(Self, 'Session Link Error B Both =' +
+            IntToStr(BPort));
+      end;
   end;
 end;
 
@@ -1690,12 +2094,24 @@ begin
     if (Assigned(FCoupledSession)) and (TrnctType <> SmpAct) then
     Begin
       Try
+        if Not Assigned(FCoupledSession.FCoupledSession) then
+          ISIndyUtilsException(Self,
+            'Full Duplex Coupled session Dispatch no return session ' + TextID);
         Result := FCoupledSession.FullDuplexDispatch(Trans, Key);
         if Not Result then
+        begin
+          ISIndyUtilsException(Self,
+            'Full Duplex Coupled session Dispatch Fail ' + TextID);
           if FOwnsCoupledSession then
             FreeAndNil(FCoupledSession)
           else
+          begin
+            if FCoupledSession <> nil then
+              if FCoupledSession.FCoupledSession = Self then
+                FCoupledSession.FCoupledSession := nil;
             FCoupledSession := nil;
+          end;
+        end;
         Result := True; // But Leave incoming for now
       Except
         on E: Exception do
@@ -1724,32 +2140,46 @@ begin
           End;
         SmpAct:
           Begin
-            if FCoupledSession <> nil then
-              Result := True;
-            Rtn := DoSimpleRemoteAction(Trans);
-            if Rtn <> '' then
-            Begin
-              RawRtn := PackTransaction(Key + Rtn, FRandomKey);
-              Write(RawRtn);
-              if CLogAll then
-              begin
-                if Length(Rtn) > 40 then
+            Try
+              if FCoupledSession <> nil then
+              Begin // Lock returns
+                Result := True;
+                if FLockSession = nil then
+                  FLockSession := TCriticalSection.Create;
+                FLockSession.Enter;
+              End;
+
+              Rtn := DoSimpleRemoteAction(Trans);
+              if Rtn <> '' then
+              Begin
+                RawRtn := PackTransaction(Key + Rtn, FRandomKey);
+                Write(RawRtn);
+                if CLogAll then
+                begin
+                  if Length(Rtn) > 40 then
 {$IFDEF NEXTGEN}
-                  Rtn.Length := 40;
+                    Rtn.Length := 40;
 {$ELSE}
-                  SetLength(Rtn, 40);
+                    SetLength(Rtn, 40);
 {$ENDIF}
-                LogAMessage(Trans + '::' + Rtn);
-              end;
-              Result := True;
-            End
-            Else
-            Begin
-              ISIndyUtilsException(Self,
-                '#ProcessNextTransaction - No Response frm Trans<' +
-                Trans + '>');
-              CloseConnection;
-              Result := false;
+                  LogAMessage(Trans + '::' + Rtn);
+                end;
+                Result := True;
+              End
+              Else
+              Begin
+                ISIndyUtilsException(Self,
+                  '#ProcessNextTransaction - No Response frm Trans<' +
+                  Trans + '>');
+                if Not Result then
+                Begin
+                  CloseConnection;
+                  Result := false;
+                End;
+              End;
+            Finally
+              if FLockSession <> nil then
+                FLockSession.Release;
             End;
           End;
         RdFileTrfBlk:
@@ -1833,17 +2263,6 @@ begin
             Write(RawRtn);
             Result := True;
           end;
-        GetIdleSeconds:
-          Begin
-            if FServerObject is TIsIndyApplicationServer then
-              Rtn := IntToStr(Trunc(TIsIndyApplicationServer(FServerObject)
-                .fIdleTimePermitted * 24 * 60 * 60))
-            else
-              Rtn := '-5555';
-            RawRtn := PackTransaction(Key + Rtn, FRandomKey);
-            Write(RawRtn);
-            Result := True;
-          End;
       Else
         Begin
           If Trans <> '' then
@@ -1898,6 +2317,28 @@ begin
   End;
 end;
 
+procedure TISIndyTCPSvrSession.SetFullDuplex(Val: Boolean);
+begin
+  if FCoupledSession = nil then
+    ISIndyUtilsException(Self, 'FullDup  FCoupledSession=nil Id=' + TextID);
+
+  if fFullDuplex <> Val then
+    if Val then
+    Begin
+      if FCoupledSession <> nil then
+        Try
+          if FLockSession = nil then
+            FLockSession := TCriticalSection.Create;
+          FLockSession.Enter;
+          fFullDuplex := FCoupledSession <> nil;
+        Finally
+          FLockSession.Release;
+        End;
+    End
+    else
+      fFullDuplex := Val;
+end;
+
 function TISIndyTCPSvrSession.SetServerConnections(AConnectData: AnsiString)
   : AnsiString;
 Var
@@ -1913,6 +2354,7 @@ begin
   else
     Exit;
 
+  ISIndyUtilsException(Self, 'Set Svr Con ' + AConnectData);
   LogAMessage('Set Svr Con ' + AConnectData);
 
   if FCoupledSession <> nil then
@@ -1930,8 +2372,11 @@ begin
     Address := Copy(AConnectData, Tst + 3, 255);
     NewCon := Svr.GetRegConnectionFor(Address);
     if NewCon <> nil then
-      LogAMessage('Set Svr Con ' + AConnectData + ' Connected to ' +
-        NewCon.Address + ':' + IntToStr(NewCon.Port));
+      ISIndyUtilsException(Self, 'Set Svr Con ' + AConnectData +
+        ' Connected to ' + NewCon.Address + ':' + IntToStr(NewCon.Port));
+
+    // LogAMessage('Set Svr Con ' + AConnectData + ' Connected to ' +
+    // NewCon.Address + ':' + IntToStr(NewCon.Port));
   End
   Else
   Begin
@@ -1984,7 +2429,7 @@ begin
   End;
 
   if FCoupledSession <> nil then
-    Result := FCoupledSession.TextID
+    Result := FCoupledSession.TextID + ' >< ' + TextID
   else
     Result := 'Fail::' + AConnectData;
 end;
@@ -2021,7 +2466,7 @@ end;
 
 function TISIndyTCPSvrSession.ShowServerDetails: AnsiString;
 Var
-  No: AnsiString;
+  no: AnsiString;
 begin
   if not(FServerObject is TIsIndyApplicationServer) then
     Result := ''
@@ -2031,92 +2476,42 @@ begin
   End;
   Result := Result + 'Session is' + TextID + #13#10;
   if Assigned(FOnSimpleRemoteAction) then
-    No := ''
+    no := ''
   Else
-    No := 'No ';
-  Result := Result + No + 'On Simple RemoteAction Assigned' + #13#10;
+    no := 'No ';
+  Result := Result + no + 'On Simple RemoteAction Assigned' + #13#10;
   if Assigned(FOnStringAction) then
-    No := ''
+    no := ''
   Else
-    No := 'No ';
-  Result := Result + No + 'On String Action Assigned' + #13#10;
+    no := 'No ';
+  Result := Result + no + 'On String Action Assigned' + #13#10;
   if Assigned(FOnAnsiStringAction) then
-    No := ''
+    no := ''
   Else
-    No := 'No ';
-  Result := Result + No + 'On Ansi String Action Assigned' + #13#10;
+    no := 'No ';
+  Result := Result + no + 'On Ansi String Action Assigned' + #13#10;
 
   Result := Result + #13#10 + 'State of Connections' +
     TGblRptComs.ReportObjectTypes;
 
 end;
 
-(*
-  Function TISIndyTCPSvrSession.ProcessSimpleRemoteActionTxn
-  (ACommand: AnsiString):AnsiString;
-  var
-  Rtn: AnsiString;
-  {$IFDEF NextGen}
-  SnapName: string;
-  {$ELSE}
-  SnapName: AnsiString;
-  {$ENDIF}
-  begin
-  Rtn := '';
-  // SnapName := '';
-  // if Pos('MakeSnapShotOfDb', ACommand) = 1 then
-  // begin
-  // MakeSnapShotOfDb(DecodeSafeFileTransferPath(ACommand), SnapName);
-  // Result := SnapName;
-  // end
-  // else if Pos('DeleteSnapShotFiles', ACommand) = 1 then
-  // Result := DeleteSnapShotFiles(DecodeSafeFileTransferPath(ACommand))
-  // else if Pos('SetEncrypted', ACommand) = 1 then
-  // SetEncrypted(Pos('^Y', ACommand) > 10)
-  // else if Pos('ForceIndexRebuild', ACommand) = 1 then
-  // begin
-  // ForceIndexRebuild;
-  // try
-  // RecoverIndexs // only from fully qualified app;
-  // except
-  // end;
-  // end
-  // else if Pos('EmailProcessStillActive', ACommand) = 1 then
-  // begin
-  // {$IFNDEF AUTOREFCOUNT}
-  // if EmailProcessStillActive then
-  // Result := 'Y'
-  // else
-  // {$ENDIF}
-  // Result := 'N';
-  // end
-  // else if Pos('RemoteDbLog' + '^>>', ACommand) = 1 then
-  // LogAMessage(ACommand)
-  // else
-  if Pos('RecoverRemoteFile' + '^', ACommand) = 1 then
-  Rtn := PackAServerFile(DecodeSafeFileTransferPath(ACommand))
-  else if Pos('RemoteFileSize' + '^', ACommand) = 1 then
-  Rtn := PackAServerFileSize(DecodeSafeFileTransferPath(ACommand))
-  // else if Pos('RemoteFileSnapShot' + '^', ACommand) = 1 then
-  // Result := PackFileSnapShotName(DecodeSafeFileTransferPath(ACommand))
-  // else if Pos('DeleteFileSnapShot' + '^', ACommand) = 1 then
-  // Result := PackDeleteSnapShot(DecodeSafeFileTransferPath(ACommand))
-  else
-  raise Exception.Create('No Code For Action::' + ACommand);
-  end;
-*)
-
 function TISIndyTCPSvrSession.TextID: String;
 begin
-  Result := 'Svr:' + IntToStr(LocalPort) + ' Frm ' + Address + ':' +
-    IntToStr(Port);
+  if (Length(Address) < 1) Or (Address[1] = '<') then
+    Result := 'Svr:' + IntToStr(LocalPort) + ' Disconnected ' + Address + ':' +
+      IntToStr(Port)
+  else
+    Result := 'Svr:' + IntToStr(LocalPort) + ' Frm ' + Address + ':' +
+      IntToStr(Port);
 end;
 
 procedure TISIndyTCPSvrSession.WasClosedForcfullyOrGracefully;
 begin
   Try
     inherited;
-
+    // Port := 0;
+    ClearReferences; // Session is closed must remove references
   Except
     On E: Exception do
       ISIndyUtilsException(Self, E, '# WasClosedForcfullyOrGracefully');
@@ -2275,8 +2670,8 @@ end;
 destructor TIsMonitorTCPAppServer.Destroy;
 begin
   Try
-  FTestThread.Terminate;
-  inherited;
+    FTestThread.Terminate;
+    inherited;
   except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'TIsMonitorTCPAppServer.Destroy');
