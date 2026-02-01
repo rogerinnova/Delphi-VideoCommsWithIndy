@@ -1076,6 +1076,7 @@ begin
 {$ENDIF}
         Result[Rcrds - 1] := S;
         inc(NextChar, i + 1);
+        inc(Rcrds);
         AlphaFlg := GetFlag(Char(NextChar[0]));
         i := 0;
       end;

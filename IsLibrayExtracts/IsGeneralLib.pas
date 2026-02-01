@@ -157,7 +157,11 @@ function IniFileNameFromExe:Ansistring;
 Var
   ExeName:String;
 Begin
+  {$IfDEF ISD10S_DELPHI}
+  ExeName:=ExeFileNameAllPlatforms;
+  {$Else}
   ExeName:=ParamStr(0);
+  {$Endif}
   Result:=ChangeFileExt(ExeName,'.ini');
 End;
 

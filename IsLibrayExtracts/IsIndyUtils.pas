@@ -53,7 +53,7 @@ Uses
 {$IFDEF MSWindows}
   WinApi.Windows,
 {$ENDIF}
-  {IsProcCl,} IdGlobal, Classes, SyncObjs, sysutils,
+  {IsProcCl,} IdStack, IdGlobal, Classes, SyncObjs, sysutils,
 {$IFNDEF FPC}
   IOUtils,
 {$ENDIF}
@@ -121,6 +121,7 @@ Procedure SetExceptionLog(AExceptLogName: AnsiString;
   AStartNewLogFile: boolean = false);
 Function ExceptionLogName: string;
 Procedure FreeSListWObjects(var ThisList: TStringlist);
+function GetThisHostIPAddressViaIndy: AnsiString;
 
 Var
   GCountOfHistoricalCons, GCountOfConnections: integer; // Base Connections
@@ -189,6 +190,26 @@ begin
     List.Free;
   end;
 end;
+
+function GetThisHostIPAddressViaIndy: AnsiString;
+{
+  The TIdStack class is pretty good. It has a property called LocalAddress,
+  but also has localAddresses, so if you have more than one IP configured for
+  the machine,
+  it will return that also.
+  showmessage('IP: '+IDSTack.GStack.LocalAddress);
+  You must have a IdTCPClient (or server presumably) for it to work.
+}
+begin
+  Try
+    TIdStack.IncUsage;
+    Result := GStack.LocalAddress;
+  Finally
+    TIdStack.DecUsage;
+  End;
+end;
+
+
 
 Function BytesToAnsiStringIS(AVal: TIdBytes): AnsiString;
 Var

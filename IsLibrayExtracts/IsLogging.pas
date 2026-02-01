@@ -504,7 +504,16 @@ begin
     begin
       FreeAndNil(FFileStm);
       Try
+{$IfDef ISD11A_DELPHI}
         sz := TFile.GetSize(FFileName);
+{$Else}
+        Try
+         FFileStm:=TFile.Create(FFileName,fmOpenRead);
+         sz := FFileStm.Seek(Int64(0), soFromEnd);
+        Finally
+         FreeAndNil(FFileStm);
+        End;
+{$EndIf}
         if FLimitSz < sz then
           if (FLimitSz > 100) then
             if (FRollNotTruncate) then
@@ -605,6 +614,9 @@ begin
     Begin
       Inc(FLastLoggedRepeat);
       FLastLoggedTime := Now;
+      if FLastLoggedRepeat > 500 then
+        if FLastLogMessage<> '500 Repeats Logged' then
+          LogAline('500 Repeats Logged');
       Exit;
     End;
 

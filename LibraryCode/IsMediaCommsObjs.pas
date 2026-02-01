@@ -31,7 +31,7 @@ uses
 {$IFDEF NextGen}
   IsNextGenPickup,
 {$ENDIF}
-  Classes, SysUtils, UITypes, IsGblLogCheck, // IsStrUtl,
+  TimeSpan, Classes, SysUtils, UITypes, // IsStrUtl,
   ISRemoteConnectionIndyTCPObjs;
 
 Type
@@ -44,7 +44,7 @@ Type
 
   TVideoComsChannel = Class(TISIndyTCPFullDuplexClient)
   Private
-    FLastRxOrAcknowledgeGraphic, FLastTx: TDateTime;
+    FLastRxOrAcknowledgeGraphic, FLastTx: TTimeSpan;
     FManager: TObject;
     FOutGoingGraphicsRequested, FOpenGraphicChannelToActiveRx: Boolean;
     FOnInComingGraphic: TInGraphicProc;
@@ -79,8 +79,7 @@ Type
 {$ENDIF}
     Function OpenChannel: Boolean;
     Function CloseChannel: Boolean;
-    Function ChannelActiveWithGraphic(Atst: TDateTime = 30 / 24 / 60 /
-      60): Boolean;
+    Function ChannelActiveWithGraphic(AInLastSeconds: integer = 30): Boolean;
     Function CloseRemoteCircuit: Boolean;
     Property OnInComingGraphic: TInGraphicProc Read FOnInComingGraphic
       write FOnInComingGraphic;
@@ -119,7 +118,7 @@ uses
 {$IFNDEF FPC}
   IsMobileCaptureDevices,
 {$ENDIF}
-  IsIndyUtils;
+  IsIndyUtils, IsGblLogCheck;
 
 Function DecodeMediaCommand(Out AData: AnsiString; ACommand: AnsiString)
   : TMediaCommands;
@@ -146,16 +145,18 @@ End;
 
 { TVideoComsChannel }
 
-function TVideoComsChannel.ChannelActiveWithGraphic(Atst: TDateTime): Boolean;
+function TVideoComsChannel.ChannelActiveWithGraphic(AInLastSeconds
+  : integer): Boolean;
 begin
-  Result := (Now - FLastRxOrAcknowledgeGraphic) < Atst;
+  Result := FChnlStopWatch.Elapsed < FLastRxOrAcknowledgeGraphic.Add
+    (TTimeSpan.FromSeconds(AInLastSeconds));
 end;
 
 procedure TVideoComsChannel.CheckChannelGraphicStillOpen;
 begin
   if FOpenGraphicChannelToActiveRx then
   Begin
-    If not ChannelActiveWithGraphic(1 / 24 / 12) then
+    If not ChannelActiveWithGraphic(360) then
     begin
       FOpenGraphicChannelToActiveRx := false;
       if GblLogAllChlOpenClose then
@@ -164,7 +165,7 @@ begin
         else
           ISIndyUtilsException(Self, 'Closing Graphic Channel ' + TextID);
     end
-    else if ChannelActiveWithGraphic(1 / 24 / 12) then
+    else if ChannelActiveWithGraphic(360) then
     begin
       FOpenGraphicChannelToActiveRx := true;
       if GblLogAllChlOpenClose then
@@ -231,7 +232,7 @@ Var
 {$ENDIF}
 begin
   Result := false;
-  FLastDuplexTime := Now;
+  FLastDuplexTime := FChnlStopWatch.Elapsed;
 {$IFDEF Debug}
   if Length(AData) > 4 then
     if FVideoInRptCount > 0 then
@@ -248,10 +249,6 @@ begin
           FLastRxOrAcknowledgeGraphic := FLastDuplexTime;
           If not TestTimeStamp(AData) then
             LogTimeStampFail(AData, 'Fail Open Traffic Timer');
-          // {$IFDEF Debug}
-          // if FVideoInRptCount = 49 then
-          // ISIndyUtilsException(Self, 'TVCmms DupIn>>OpenTraffic>>' + AData);
-          // {$ENDIF}
         End;
       CloseTraffic:
         Begin
@@ -281,8 +278,8 @@ begin
               LogTimeStampFail(AData, 'Fail Bitmap Timer::');
           FOpenGraphicChannelToActiveRx := true;
           If FOutGoingGraphicsRequested then
-           If not OpenChannel then // respond with open traffic
-            ISIndyUtilsException(Self,'Open Channell Fail on'+textId);
+            If not OpenChannel then // respond with open traffic
+              ISIndyUtilsException(Self, 'Open Channell Fail on' + TextID);
         end;
       CloseTxCircuit:
         Begin
@@ -295,8 +292,9 @@ begin
           OpenChannel
         else
           Result := Inherited DoFullDuplexIncomingAction(AData);
-      else
-       ISIndyUtilsException(self,'No Decode DoFullDuplexIncomingAction::'+FLastPayload);
+    else
+      ISIndyUtilsException(Self, 'No Decode DoFullDuplexIncomingAction::' +
+        FLastPayload);
     end;
   Except
     On E: Exception do
@@ -476,7 +474,7 @@ begin
   Result := false;
   Try
     FPermHold := true; // TISIndyTCPFullDuplexClient.PermHold
-    FPoleInterval := 1 / 24 / 60;
+    FPoleInterval := TTimeSpan.FromMinutes(1);
     Result := FManager = AManager;
     if Result then
       Exit;
@@ -605,16 +603,21 @@ end;
 
 procedure TVideoComsChannel.WasClosedForcfullyOrGracefully;
 Var
-  Date: TDateTime;
+  Duration: TTimeSpan;
 begin
-  Date := Now;
+  if FConnection <> nil then
+  Begin
+    Duration := FChnlStopWatch.Elapsed;
+    ISIndyUtilsException(Self, TextID + '# WasClosedForcfullyOrGracefully ' +
+      Duration.ToString);
+  end;
   inherited;
 end;
 
 function TVideoComsChannel.Write(AData: RawByteString): integer;
 begin
   Try
-    FLastTx := Now;
+    FLastTx := FChnlStopWatch.Elapsed;
     Result := Inherited;
   Except
     On E: Exception do

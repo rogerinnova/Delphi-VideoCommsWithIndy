@@ -13,7 +13,7 @@ uses
     , IsNextGenPickup
 {$ENDIF}
 {$IFDEF InnovaComms}
-    , IsIndyUtils, ISProcCl,
+    , ISProcCl,
   InnovaCommsDbObjects,
   isremoteconnectionindytcpobjs
 {$ENDIF}
@@ -59,7 +59,7 @@ Var
 
 implementation
 
-uses IsLogging, IsIndyUtils;
+uses IsIndyUtils,IsLogging;
 
 Procedure OpenAppLogging(AStartNewLogFile: Boolean; ALogFileName: String = '';
   ARptTcpOpenClose: Boolean = false; ARptTcpData: Boolean = false;

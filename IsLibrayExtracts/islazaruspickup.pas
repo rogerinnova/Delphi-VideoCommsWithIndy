@@ -31,7 +31,7 @@ for Lazarus and FPC
 
     { TFile }
 
-    TFile = Class(TObject)
+    TFile = Class(TFileStream)
       Class Function GetCreationTime(AName: String): TDateTime;
     end;
 

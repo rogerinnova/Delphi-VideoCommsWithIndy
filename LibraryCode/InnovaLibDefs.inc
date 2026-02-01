@@ -22,6 +22,8 @@
 
 http://docwiki.embarcadero.com/RADStudio/Athens/en/Compiler_Versions
 
+
+VER370  Delphi 13 Florence
 VER360 	Delphi 12.0 Athens / C++Builder 12.0 Athens 	29 	290 	36.0
 VER350 	Delphi 11.0 Alexandria / C++Builder 11.0 Alexandria 	28 	280 	35.0
 VER340 	Delphi 10.4 Sydney / C++Builder 10.4 Sydney 	27 	270 	34.0

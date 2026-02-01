@@ -23,7 +23,7 @@ uses
   VCL.Graphics,
   VCL.ExtCtrls,
 {$ENDIF}
-  IsMediaCommsObjs, IsRemoteConnectionIndyTcpObjs, IsArrayLib;
+  TimeSpan,IsMediaCommsObjs, IsRemoteConnectionIndyTcpObjs, IsArrayLib;
 
 Type
   // {$IFDEF UseVCLBITMAP}
@@ -43,7 +43,7 @@ Type
 
   TImageMngrVCL = class(TObject)
   private
-    FTabPnl: TPanel;
+    FImagePnll: TPanel;
     FDefaultBitMap: TBitmap;
     FImageArray: TImageArray;
     FCurrentPrime: TImagePosObjVCL;
@@ -54,11 +54,11 @@ Type
     Procedure SetRowsCols(APnlWidth, APnlHeight: single;
       Out AColCnt, ARowCnt: integer);
   public
-    Constructor Create(ATabPnl: TPanel; ANoOfChnls: Integer);
+    Constructor Create(AImagePnl: TPanel; ANoOfChnls: Integer);
     Destructor Destroy; override;
-    Procedure SetImagePanels(ATabPnl: TPanel);
-    Procedure InsertImagesAt(ATabPnl: TPanel; AAddAt, ANoToAdd: Integer);
-    Procedure GrowImageLists(ATabPnl: TPanel; ANoOfMangedImages: Integer);
+    Procedure SetImagePanels(AImagePnl: TPanel);
+    Procedure InsertImagesAt(AImagePnl: TPanel; AAddAt, ANoToAdd: Integer);
+    Procedure GrowImageLists(AImagePnl: TPanel; ANoOfMangedImages: Integer);
     Procedure DisConnectInactiveImageChannels(AListOfCurrentRx: TStrings;
       AMinutesInActive: Integer);
     Procedure BlankInactiveImageChannels(AListOfCurrentRx: TStrings;
@@ -90,7 +90,7 @@ Type
     FPort: Integer;
     FSyncBitmap: Boolean;
     FVideoComs: TVideoComsChannel;
-    FLastRxGraphicTime: TDateTime;
+    FLastRxGraphicTime: TTimeSpan;
     FActiveChnl: Boolean;
     Function RxAnsiString(ACommand: ansistring; ATcpSession: TISIndyTCPBase)
       : ansistring;
@@ -139,14 +139,14 @@ begin
           .BlankInactiveChannel(AMinutesInActive);
 end;
 
-constructor TImageMngrVCL.Create(ATabPnl: TPanel; ANoOfChnls: Integer);
+constructor TImageMngrVCL.Create(AImagePnl: TPanel; ANoOfChnls: Integer);
 begin
-  FTabPnl := ATabPnl;
-  if FTabPnl = nil then
+  FImagePnll := AImagePnl;
+  if FImagePnll = nil then
     Exit;
   FCurrentPrime := nil;
 
-  GrowImageLists(FTabPnl, ANoOfChnls);
+  GrowImageLists(FImagePnll, ANoOfChnls);
 end;
 
 function TImageMngrVCL.DefaultBitMap: TBitmap;
@@ -192,7 +192,7 @@ end;
 procedure TImageMngrVCL.DoOnPanelResize(Sender: TObject);
 begin
   // if Sender=FTabPnl then
-  SetImagePanels(FTabPnl);
+  SetImagePanels(FImagePnll);
 end;
 
 function TImageMngrVCL.FindNullImage(AListOfCurrentRx: TStrings;
@@ -228,28 +228,28 @@ begin
 
   if Result = nil then
   begin
-    GrowImageLists(FTabPnl, NextManual + 1);
+    GrowImageLists(FImagePnll, NextManual + 1);
     Result := ImageControl(NextManual);
   end;
 end;
 
-procedure TImageMngrVCL.GrowImageLists(ATabPnl: TPanel;
+procedure TImageMngrVCL.GrowImageLists(AImagePnl: TPanel;
   ANoOfMangedImages: Integer);
 Var
   NewImage: TImageControl;
   CurrentLength: Integer;
   IDX: Integer;
 begin
-  if ATabPnl <> FTabPnl then
+  if AImagePnl <> FImagePnll then
   Begin
     ISIndyUtilsException(Self, 'ATab<>FTab GrowImageLists');
     Exit;
   End;
   try
-    if FTabPnl = nil then
+    if FImagePnll = nil then
       Exit;
 
-    FTabPnl.OnResize := DoOnPanelResize;
+    FImagePnll.OnResize := DoOnPanelResize;
     CurrentLength := Length(FImageArray);
     if CurrentLength < ANoOfMangedImages then
     Begin
@@ -264,8 +264,8 @@ begin
         // NewImageCtrl.EnableDragHighlight := false;
         NewImage.OnClick := FPArray[CurrentLength].OnImageClick;
         // NewImageCtrl.Bitmap := DefaultBitMap;
-        NewImage.Name := ATabPnl.Name + 'Im' + IntToStr(CurrentLength);
-        NewImage.Parent := FTabPnl; // parent
+        NewImage.Name := AImagePnl.Name + 'Im' + IntToStr(CurrentLength);
+        NewImage.Parent := FImagePnll; // parent
         NewImage.Stretch := true;
         NewImage.Proportional := true;
         FImageArray[CurrentLength] := NewImage;
@@ -274,7 +274,7 @@ begin
       for IDX := 0 to CurrentLength - 1 do
         FPArray[IDX].ReSetValues(IDX, TPointFZero, TPointFZero);
     End;
-    SetImagePanels(FTabPnl);
+    SetImagePanels(FImagePnll);
   except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'GrowImageLists');
@@ -287,7 +287,7 @@ begin
     FCurrentPrime := nil
   else
     FCurrentPrime := APosObj;
-  SetImagePanels(FTabPnl);
+  SetImagePanels(FImagePnll);
 end;
 
 function TImageMngrVCL.ImageControl(AIndx: Integer): TImageControl;
@@ -306,7 +306,7 @@ begin
   Result := FImageArray;
 end;
 
-procedure TImageMngrVCL.InsertImagesAt(ATabPnl: TPanel;
+procedure TImageMngrVCL.InsertImagesAt(AImagePnl: TPanel;
   AAddAt, ANoToAdd: Integer);
 Var
   ThisArray: TArrayofObjects;
@@ -330,8 +330,8 @@ begin
     // NewImageCtrl.EnableDragHighlight := false;
     NewImage.OnClick := FPArray[I].OnImageClick;
     // NewImageCtrl.Bitmap := DefaultBitMap;
-    NewImage.Name := ATabPnl.Name + 'Im' + IntToStr(CurrentLength - I);
-    NewImage.Parent := FTabPnl; // parent
+    NewImage.Name := AImagePnl.Name + 'Im' + IntToStr(CurrentLength - I);
+    NewImage.Parent := FImagePnll; // parent
     NewImage.Stretch := true;
     NewImage.Proportional := true;
     FImageArray[I] := NewImage;
@@ -339,10 +339,10 @@ begin
 
   for I := 0 to (CurrentLength - 1) do
     FPArray[I].ReSetValues(I, TPointFZero, TPointFZero);
-  SetImagePanels(FTabPnl);
+  SetImagePanels(FImagePnll);
 End;
 
-procedure TImageMngrVCL.SetImagePanels(ATabPnl: TPanel);
+procedure TImageMngrVCL.SetImagePanels(AImagePnl: TPanel);
 Var
   ImgIdx, ImgCnt, ColCnt, RowCnt, ColIdx, RowIdx: integer;
   PnlWidth, PnlHeight, ImgWidth, ImgHeight: single;
@@ -356,9 +356,9 @@ Begin
 {$Else}
 begin
 {$Endif}
-  if ATabPnl = nil then
+  if AImagePnl = nil then
     Exit;
-  if ATabPnl <> FTabPnl then
+  if AImagePnl <> FImagePnll then
   Begin
     ISIndyUtilsException(Self, 'ATab<>FTab GrowImageLists');
     Exit;
@@ -376,8 +376,8 @@ begin
     if ImgCnt < 1 then
       Exit;
 
-    PnlWidth := FTabPnl.Width;
-    PnlHeight := FTabPnl.Height;
+    PnlWidth := FImagePnll.Width;
+    PnlHeight := FImagePnll.Height;
     if FCurrentPrime <> nil then
     begin
       ImgIdx := 0;
@@ -726,7 +726,7 @@ begin
   if FImagelManager = nil then
     Raise Exception.Create('Must Have FImageCtrlManager');
   FPresetBmp := FImagelManager.DefaultBitMap; // testing
-  FParentPanel := FImagelManager.FTabPnl;
+  FParentPanel := FImagelManager.FImagePnll;
   Inherited Create;
 end;
 
@@ -794,7 +794,7 @@ begin
     if VideoIsActive(AInLastNoMins) then
       Exit;
 
-    if FVideoComs <> nil then
+    if FVideoComs is TVideoComsChannel then
     Begin
       if Assigned(FVideoComs.OnInComingGraphic) then
         FVideoComs.OnInComingGraphic(nil);
@@ -838,7 +838,7 @@ end;
 destructor TVideoChnlLinkVCL.Destroy;
 begin
   // GlobalSelectDebugChn:= FVideoComs;
-  FreeAndNil(FVideoComs);
+  FreeAndNilDuplexChannel(Pointer(FVideoComs));
   inherited;
 end;
 
@@ -849,7 +849,7 @@ begin
       Exit;
 
     if FVideoComs <> nil then
-      if FVideoComs.ChannelActiveWithGraphic(AInLastNoMins / 24 / 60) then
+      if FVideoComs.ChannelActiveWithGraphic(AInLastNoMins) then
         Exit
       else
       Begin
@@ -892,7 +892,7 @@ begin
     if (AGraphic = nil) then
     begin
       if FVideoComs is TVideoComsChannel then
-        if not FVideoComs.ChannelActiveWithGraphic(1 / 24 / 60) then
+        if not FVideoComs.ChannelActiveWithGraphic(60) then
           if FImage.Visible then
             FImage.Visible := false;
     end
@@ -900,7 +900,8 @@ begin
     Begin
       if FSyncBitmap and IsNotMainThread then
         raise Exception.Create('RxGraphic not Synced');
-      FLastRxGraphicTime := Now;
+      if FVideoComs<>nil then
+         FLastRxGraphicTime := FVideoComs.StopWatch.Elapsed;
       FActiveChnl := true;
       FImage.Picture.Graphic := AGraphic;
       // Bitmap is assigned >> Refcount data inc
@@ -945,13 +946,14 @@ Var
   Recent: Boolean;
 begin
   try
+    Result := false;
+    if FVideoComs = nil then exit;
+
     if AInLastNoMins < 1 then
       AInLastNoMins := 3;
+
     if FActiveChnl then
-      Result := (FLastRxGraphicTime + AInLastNoMins / (24 * 60)) > (Now)
-    else
-      Result := false;
-    FActiveChnl := Result;
+      Result := FVideoComs.StopWatch.Elapsed < FLastRxGraphicTime.Add(TTimeSpan.FromMinutes(AInLastNoMins));
   Except
     On E: Exception do
     begin

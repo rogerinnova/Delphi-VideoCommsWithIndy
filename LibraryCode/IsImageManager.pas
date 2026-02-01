@@ -31,11 +31,11 @@ Type
     Procedure DoOnPanelResize(Sender: TObject);
     Procedure ImageClicked(APosObj: TImagePosObj);
   public
-    Constructor Create(ATabPnl: TPanel; ANoOfChnls: integer);
+    Constructor Create(AImagePnl: TPanel; ANoOfChnls: integer);
     Destructor Destroy; override;
-    Procedure SetImagePanels(ATabPnl: TPanel);
-    Procedure InsertImagesAt(ATabPnl: TPanel; AAddAt, ANoToAdd: integer);
-    Procedure GrowImageLists(ATabPnl: TPanel; ANoOfChnls: integer);
+    Procedure SetImagePanels(AImagePnl: TPanel);
+    Procedure InsertImagesAt(AImagePnl: TPanel; AAddAt, ANoToAdd: integer);
+    Procedure GrowImageLists(AImagePnl: TPanel; ANoOfChnls: integer);
     Procedure DisConnectInactiveImageChannels(AListOfCurrentRx: TStrings;
       AMinutesInActive: integer);
     Procedure BlankInactiveImageChannels(AListOfCurrentRx: TStrings;
@@ -276,9 +276,9 @@ begin
           .BlankInactiveChannel(AMinutesInActive);
 end;
 
-constructor TImageCntrlManager.Create(ATabPnl: TPanel; ANoOfChnls: integer);
+constructor TImageCntrlManager.Create(AImagePnl: TPanel; ANoOfChnls: integer);
 begin
-  FImagesPanel := ATabPnl;
+  FImagesPanel := AImagePnl;
   if FImagesPanel = nil then
     Exit;
 
@@ -363,14 +363,14 @@ begin
   End;
 end;
 
-procedure TImageCntrlManager.GrowImageLists(ATabPnl: TPanel;
+procedure TImageCntrlManager.GrowImageLists(AImagePnl: TPanel;
   ANoOfChnls: integer);
 Var
   NewImageCtrl: TImageControl;
   CurrentLength: integer;
   IDX: integer;
 begin
-  if ATabPnl <> FImagesPanel then
+  if AImagePnl <> FImagesPanel then
   Begin
     ISIndyUtilsException(Self, 'ATab<>FTab GrowImageLists');
     Exit;
@@ -395,7 +395,7 @@ begin
         NewImageCtrl.EnableDragHighlight := false;
         NewImageCtrl.OnClick := FPArray[CurrentLength].OnImageClick;
         NewImageCtrl.Bitmap := DefaultBitMap;
-        NewImageCtrl.Name := ATabPnl.Name + 'Im' + IntToStr(CurrentLength);
+        NewImageCtrl.Name := AImagePnl.Name + 'Im' + IntToStr(CurrentLength);
         NewImageCtrl.Parent := FImagesPanel; // parent
         FImageArray[CurrentLength] := NewImageCtrl;
         inc(CurrentLength);
@@ -437,7 +437,7 @@ begin
   Result := FImageArray;
 end;
 
-procedure TImageCntrlManager.InsertImagesAt(ATabPnl: TPanel;
+procedure TImageCntrlManager.InsertImagesAt(AImagePnl: TPanel;
   AAddAt, ANoToAdd: integer);
 Var
   ThisArray: TArrayofObjects;
@@ -461,7 +461,7 @@ begin
     NewImage.EnableDragHighlight := false;
     NewImage.OnClick := FPArray[I].OnImageClick;
     // NewImageCtrl.Bitmap := DefaultBitMap;
-    NewImage.Name := ATabPnl.Name + 'Im' + IntToStr(CurrentLength - I);
+    NewImage.Name := AImagePnl.Name + 'Im' + IntToStr(CurrentLength - I);
     NewImage.Parent := FImagesPanel; // parent
     // NewImage.Stretch := true;
     // NewImage.Proportional := true;
@@ -473,15 +473,15 @@ begin
   SetImagePanels(FImagesPanel);
 End;
 
-procedure TImageCntrlManager.SetImagePanels(ATabPnl: TPanel);
+procedure TImageCntrlManager.SetImagePanels(AImagePnl: TPanel);
 Var
   ImgIdx, ImgCnt, ColCnt, RowCnt, ColIdx, RowIdx: integer;
   PnlWidth, PnlHeight, ImgWidth, ImgHeight: single;
   ThisPos, ThisScale, ThisSz: TPointF;
 begin
-  if ATabPnl = nil then
+  if AImagePnl = nil then
     Exit;
-  if ATabPnl <> FImagesPanel then
+  if AImagePnl <> FImagesPanel then
   Begin
     ISIndyUtilsException(Self, 'ATab<>FTab GrowImageLists');
     Exit;

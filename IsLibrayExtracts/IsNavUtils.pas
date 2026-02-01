@@ -2,14 +2,25 @@
 // Ref https://www.movable-type.co.uk/scripts/latlong.html
 { On ARM system include iOS and Android, however, the System.Extended type is an alias for System.Double,
   which is only 8 bytes. This difference can adversely affect numeric precision in floating-point operations. }
+{$IFDEF FPC}
+{$MODE Delphi}
+// {$I InnovaLibDefsLaz.inc}
+{$H+}
+{$ELSE}
+// {$I InnovaLibDefs.inc}
+{$ENDIF}
 
 interface
-
+{$IfDef FPC}
+uses Math, SysUtils, Types, UITypes, Classes, Variants
+{$Else}
 uses Math, System.SysUtils, System.Types, System.UITypes, System.Classes,
+System.Variants
+{$Endif}
 {$IFDEF MSWINDOWS}
-  WinApi.Windows, WinApi.ShellAPI, ansistrings,
+  ,WinApi.Windows, WinApi.ShellAPI, ansistrings
 {$ENDIF}
-  System.Variants;
+ ;
 
 Type
   RNavigateLongLat = record
@@ -1023,8 +1034,12 @@ end;
 
 Function CalDoubleStdDevFromSumOfSquares(ARunningAveageSumOfSqrs: Double;
   ANoOfSamples: Integer): Double;
+  //std Dev meaningless below ????? 5
+{Estimate the Standard Deviation from a Sample
+Use the sample as an estimate of the whole population
+}
 begin
-  if (ANoOfSamples < 2) or IsNan(ARunningAveageSumOfSqrs) then
+  if (ANoOfSamples < 5) or IsNan(ARunningAveageSumOfSqrs) then
     Result := 0.0
   else
     // Result:=  Sqrt(ARunningAveageSumOfSqrs)/(ANoOfSamples-1);
