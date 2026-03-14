@@ -902,7 +902,7 @@ begin
       Exit;
 
     if FVideoComs <> nil then
-      if FVideoComs.ChannelActiveWithGraphic(AInLastNoMins / 24 / 60) then
+      if FVideoComs.ChannelActiveWithGraphic(Round(AInLastNoMins * 60)) then
         Exit
       else
         FreeAndNilDuplexChannel(FVideoComs);
@@ -945,7 +945,7 @@ begin
     begin
       if FVideoComs is TVideoComsChannel then
       Begin
-        if not FVideoComs.ChannelActiveWithGraphic(1 / 24 / 60) then
+        if not FVideoComs.ChannelActiveWithGraphic(60) then
           if FImage.Visible then
             FImage.Visible := false;
       End

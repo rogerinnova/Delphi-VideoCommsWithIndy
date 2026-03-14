@@ -1397,8 +1397,8 @@ begin
           TIsGraphics.DrawElipse(Rect, Canvas, TAlphaColorRec.red, 10,
             0.9, False);
         end;
-        // Sleep(1000); one per second
-        Sleep(50); // ten per second ??
+        Sleep(200); // five per second
+        //Sleep(100); // ten per second ??
         IntTime := Round(now * MediaTimeScale * SecsPerDay);
         SampleBufferReady(IntTime);
         // Now := MediaTime / MediaTimeScale / SecsPerDay;

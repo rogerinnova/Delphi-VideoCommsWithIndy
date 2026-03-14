@@ -15,9 +15,9 @@ uses
   System.SysUtils,
   System.Classes,
   System.SyncObjs,
-{$IFNDEF  SuppressIPMetering}
+  {#$IFNDEF  SuppressIPMetering}
   System.TimeSpan, System.Diagnostics,
-{$ENDIF}
+  {#$ENDIF}
 {$ENDIF}
   IdContext, inifiles, IdTCPConnection, IdGlobal, IdYarn,
   IdBaseComponent, IdComponent, IdCustomTCPServer, IdTCPServer, ISStrUtl,
@@ -25,7 +25,7 @@ uses
 {$IFDEF Nextgen}
   IsNextGenPickup,
 {$ENDIF}
-  ISRemoteConnectionIndyTCPObjs;
+  IsObjectTimeSpanRecording, ISRemoteConnectionIndyTCPObjs;
 
 type
   TComandActionString = Function(AData: String; ATcpSession: TISIndyTCPBase)
@@ -35,12 +35,14 @@ type
 
   TBusyCheckCalls = class(TObject)
   private
-    FLastCall, FAllowTo80: TDateTime;
+    FLastCall, FAllowTo80: TTimeSpan;
     FCountTo80, FTotalCalls: Integer;
     FIpStr: string;
+    FBusyWatch: TStopwatch;
   Public
-    constructor Create(Const AAllowence: TDateTime; Const AIpStr: string);
-    Function NotTooBusy(const AAllowance: TDateTime): Boolean;
+    constructor Create(Const AAllowence: TTimeSpan; Const AIpStr: string);
+    Destructor Destroy; Override;
+    Function NotTooBusy(const AAllowance: TTimeSpan): Boolean;
     Function TextData: String;
   end;
 
@@ -98,7 +100,7 @@ type
     function DropCoupledSession: AnsiString;
   protected
     FCountTo80: Integer;
-    FNext80TransactionAllowance: TDateTime;
+    FNext80TransactionAllowance: TTimeSpan;
     FOnLogMsg: TISIndyLogEvent;
     // function ProcessSimpleRemoteActionTxn(ACommand: AnsiString):AnsiString;
     Procedure SetFullDuplex(Val: Boolean); override;
@@ -144,8 +146,8 @@ type
   Private
     FTcpRef: TISIndyTCPSvrSession;
     FDestroying: Boolean;
-{$IFNDEF  SuppressIPMetering}
     FContextStopWatch: TStopwatch;
+{$IFNDEF  SuppressIPMetering}
     FLastProcessComplete: TTimeSpan;
     FAverageProcTm, FmaxProcTm, FminProcTm, FAverageDnTm, FmaxDnTm,
       FminDnTm: Double;
@@ -168,6 +170,7 @@ type
     Property AverageProcessTime: Double read FAverageProcTm; // msecs
     Property AverageDownTime: Double read FAverageDnTm; // msecs
 {$ENDIF}
+    Property ContextStopWatch: TStopwatch Read FContextStopWatch;
   end;
 
   { TIsIndyApplicationServer }
@@ -186,10 +189,9 @@ type
     FOnSessionStringAction: TComandActionString;
     FServerTcpSessions: Integer;
     FListOfRegConnections: TStringList;
-    FTimeLimitFor80Calls, FTimeLimitFor80Transactions: TDateTime;
+    FTimeLimitFor80Calls, FTimeLimitFor80Transactions: TTimeSpan;
     fIdleTimePermitted: TTimeSpan;
     FResetStartTime: TDateTime; // if > now then reset/reject calls;
-    function GetMaxCallsPerMinute: Integer;
     function GetSessionByCallingPort(APeerPortNo: Integer)
       : TISIndyTCPSvrSession;
     // Find ASession on the server given the calling port
@@ -203,6 +205,7 @@ type
     // Connections on Ip Address
     procedure CheckBusyOnPacket(ASession: TISIndyTCPSvrSession);
     // packets on channel
+    function GetMaxCallsPerMinute: Integer;
     procedure SetMaxCallsperminute(AValue: Integer);
     procedure LoadServerIniData;
     Procedure CloseInactiveSessions;
@@ -210,6 +213,7 @@ type
     Procedure DropSession(ASession: TISIndyTCPSvrSession);
     Procedure DropAllCurrentSessions; // On Closing server
   Protected
+    FSrvrStopWatch: TStopWatch;
     procedure Shutdown; override;
     procedure AddLogMessage(ATextID, AMsg: String);
   Public
@@ -344,8 +348,6 @@ begin
 end;
 
 { TIsIndyApplicationServer }
-Const
-  cStart80TransactionAllowence = 1 / 24 / 60 / 60 / 200; // 5msec
 
 procedure TIsIndyApplicationServer.AddLogMessage(ATextID, AMsg: String);
 
@@ -570,7 +572,10 @@ begin
     try
       if CurrentAddresses.Find(IpStr, IpIdx) then
       Begin
-        IObj := TBusyCheckCalls(fCurrentAddresses.Objects[IpIdx]);
+        if fCurrentAddresses.Objects[IpIdx] is TBusyCheckCalls then
+          IObj := TBusyCheckCalls(fCurrentAddresses.Objects[IpIdx])
+        else
+          IObj := nil;
       end
       else
       begin
@@ -595,7 +600,7 @@ procedure TIsIndyApplicationServer.CheckBusyOnPacket
 // TcpSession: TISIndyTCPSvrSession;
 // See Also \MonitorServers\MonitorTestObjs >> TSrverUsageAndBlockObj
 Var
-  LocalAllocationTime, TM: TDateTime;
+  LocalAllocationTime, TM: TTimeSpan;
 
   // packets on channel
   s: string;
@@ -608,43 +613,34 @@ begin
     Inc(ASession.FCountTo80);
     if ASession.FCountTo80 > 80 then
     begin
-      TM := now;
+      TM := ASession.StopWatch.Elapsed;
       ASession.FCountTo80 := 0;
       // ISIndyUtilsException(Self, ASession.TextId+' #FcountTo80 At ' +
       // FormatDateTime('nn:ss.z', Tm));
       LocalAllocationTime := ASession.FNext80TransactionAllowance;
       if TM > LocalAllocationTime then
       begin
-        // s := 'Time is ' + FormatDateTime('nn:ss.z', Tm) + crlf +
-        // '     80 Transactions in ' + FormatDateTime('nn:ss.z',
-        // Tm - LocalAllocationTime) + crlf +
-        // '     Min Time for 80 Transactions is ' + FormatDateTime('ss.zzz',
-        // FTimeLimitFor80Transactions) + ' seconds';
-        s := ASession.TextID + crlf + s;
-        // ISIndyUtilsException(Self, s);
         ASession.FCountTo80 := 0;
       end
       else
       Begin
         ISIndyUtilsException(Self, ASession.TextID +
-          '# Svr Busy FcountTo80 too early by ' + FormatDateTime('nn:ss.z',
-          LocalAllocationTime - TM));
+          '# Svr Busy FcountTo80 too early by ' + LocalAllocationTime.Subtract
+          (TM).ToString);
         AddLogMessage(ASession.TextID, 'Too Busy');
-        ISIndyUtilsException(Self, '#Svr Busy will Release at ' +
-          FormatDateTime('nn:ss.zzz ', LocalAllocationTime));
+        ISIndyUtilsException(Self, '#Svr Busy will Release in ' +
+          LocalAllocationTime.Subtract(TM).ToString);
         while TM < LocalAllocationTime do
         begin
           ISIndyUtilsException(Self,
-            'Waiting' + FormatDateTime('nn:ss.zzz ', TM));
+            'Waiting' + FormatDateTime('nn:ss.zzz ', now));
           // must be local as other threads will do check busy
           Sleep(2000); // hold thread for two seconds
-          TM := now;
+          TM := ASession.StopWatch.Elapsed;
         end;
       end;
-      ASession.FNext80TransactionAllowance := TM + FTimeLimitFor80Transactions;
-
-      // ISIndyUtilsException(Self,ASession.TextId+'# Next Allocation ' +
-      // FormatDateTime('hh:nn:ss.zzz', ASession.FNext80TransactionAllowance));
+      ASession.FNext80TransactionAllowance := ASession.StopWatch.Elapsed.Add
+        (FTimeLimitFor80Transactions);
     end;
   Except
     On E: Exception do
@@ -704,6 +700,7 @@ constructor TIsIndyApplicationServer.Create(AOwner: TComponent);
 Var
   LogStart: String;
 begin
+  FSrvrStopWatch:= TStopWatch.StartNew;
   FServerClosing := false;
   // Four Seconds;
   FTimeLimitFor80Transactions := cStart80TransactionAllowence;
@@ -716,7 +713,7 @@ begin
   // OnContextCreated := IsIdTCPSrvrContextCreated;
   MaxCallsPerMinute := 800;
   ISIndyUtilsException(Self,
-    '#' + 'New IsIndyApplicationServer Max Calls Per Min ' +
+    '#' + 'New IsIndyApplicationServer Max Callromas Per Min ' +
     IntToStr(MaxCallsPerMinute));
   LoadServerIniData;
   LogStart := 'After Ini' + crlf + 'IsIndyApplicationServer Max Calls Per Min '
@@ -763,20 +760,34 @@ end;
 destructor TIsIndyApplicationServer.Destroy;
 begin
   Try
+    ISIndyUtilsException(Self, 'Start Destroy Srv: ' + IntToStr(DefaultPort));
     DropAllCurrentSessions;
+    ISIndyUtilsException(Self, 'DropAllSessions');
     fCurrentSessionObjects.Free;
     FListOfRegConnections.Free;
+    ISIndyUtilsException(Self, 'FListOfRegConnections.Free;');
     FLogList.Free;
     FListLock.Free;
     FBusyLock.Free;
+    ISIndyUtilsException(Self, 'FBusyLock.Free;');
     fCurrentAddresses.Free; // Owns Objects;
+    ISIndyUtilsException(Self, 'fCurrentAddresses.Free;');
     // FreeSListWObjects(fCurrentAddresses);
     // fCurrentAddresses:=nil;
   except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'TIsIndyApplicationServer.Destroy');
   end;
-  inherited;
+  try
+    ISIndyUtilsException(Self, 'Destroy Do Inherited');
+    inherited;
+    ISIndyUtilsException(Self, 'Destroy Done Inherited');
+  except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'Destroy.Inherited');
+  end;
+  TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
+      FSrvrStopWatch.Elapsed);
 end;
 
 procedure TIsIndyApplicationServer.DropAllCurrentSessions;
@@ -869,7 +880,9 @@ end;
 
 function TIsIndyApplicationServer.GetMaxCallsPerMinute: Integer;
 begin
-  Result := Round(80 / (FTimeLimitFor80Calls * 24 * 60));
+  if FTimeLimitFor80Calls.Ticks<FTimeLimitFor80Calls.TicksPerMillisecond  then
+     FTimeLimitFor80Calls:= TTimeSpan.FromMilliseconds(2);
+  Result := Round(80 / FTimeLimitFor80Calls.TotalMinutes);
 end;
 
 function TIsIndyApplicationServer.GetRegConnectionFor(ARegString: AnsiString)
@@ -957,7 +970,7 @@ begin
       if LConnection.Connected then
       begin
         if FResetStartTime > 0 then
-          if FResetStartTime < Now  then
+          if FResetStartTime < now then
             FResetStartTime := 0.0
           else
           begin
@@ -1028,7 +1041,8 @@ begin
     ThisSession.OnSimpleRemoteAction := OnSessionSimpleRemoteAction;
     if GblRptMakeConnectionOnSrvr then
     Begin
-      ISIndyUtilsException(Self, 'On Connect::' + IntToStr(FServerTcpSessions));
+      ISIndyUtilsException(Self, '#On Connect::' +
+        IntToStr(FServerTcpSessions));
       AddLogMessage('Server', 'On Connect::' + IntToStr(FServerTcpSessions));
     End;
     if FResetStartTime > 0.01 then
@@ -1252,7 +1266,7 @@ end;
 
 procedure TIsIndyApplicationServer.LoadServerIniData;
 Var
-  IdleSeconds: Integer;
+  IdleSeconds,MxCallsPmin: Integer;
   IniFile: TIniFile;
   IniFileName: String;
 begin
@@ -1274,7 +1288,13 @@ begin
           IdleSeconds := 60 * 5;
           IniFile.WriteInteger('TCP', 'IdleTimeInSeconds', IdleSeconds);
         end;
-        fIdleTimePermitted:= TTimeSpan.FromSeconds(IdleSeconds);
+        fIdleTimePermitted := TTimeSpan.FromSeconds(IdleSeconds);
+        MxCallsPmin:=IniFile.ReadInteger('TCP','MaxCallsPerMin',-1);
+        if MxCallsPmin>0 then
+          MaxCallsPerMinute:=MxCallsPmin
+         else
+          if MxCallsPmin<0 then
+           IniFile.WriteInteger('TCP','MaxCallsPerMin',0);
       finally
         IniFile.Free;
       end;
@@ -1420,18 +1440,23 @@ end;
 
 procedure TIsIndyApplicationServer.SetMaxCallsperminute(AValue: Integer);
 begin
-  FTimeLimitFor80Calls := 80 / AValue / 24 / 60;
+  FTimeLimitFor80Calls:=TTimeSpan.FromMinutes(80 / AValue);
 end;
 
 procedure TIsIndyApplicationServer.Shutdown;
 Var
-  Start: TDateTime;
+  ClosingTimer: TStopwatch;
 begin
-  Start := now;
+  try
+  ClosingTimer:=TStopwatch.StartNew;
   FServerClosing := True;
   inherited;
   ISIndyUtilsException(Self, '# Time To Shutdown =' +
-    FormatDateTime('nn:ss.zzz', now - Start));
+    ClosingTimer.Elapsed.ToString);
+  Except
+   On E:Exception do
+     ISIndyUtilsException(self,E,'On ShutDown');
+  End;
 end;
 
 { TIsIndyTCPServerContext }
@@ -1499,8 +1524,12 @@ end;
 constructor TIsIndyTCPServerContext.Create(AConnection: TIdTCPConnection;
   AYarn: TIdYarn; AList: TIdContextThreadList);
 begin
+  FContextStopWatch := TStopwatch.StartNew;
+  if FContextStopWatch.IsHighResolution then
+//    FContextStopWatch.Start
+  else
+    ISIndyUtilsException(Self, 'Not FContextStopWatch.IsHighResolution');
 {$IFNDEF  SuppressIPMetering}
-  FContextStopWatch := TStopwatch.Create;
   FLastProcessComplete := FContextStopWatch.Elapsed;
 {$ENDIF}
   inherited; // added to server contexts on beforerun
@@ -1519,6 +1548,8 @@ destructor TIsIndyTCPServerContext.Destroy;
 Var
   s: String;
 begin
+  TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
+    FContextStopWatch.Elapsed);
   FDestroying := True;
   try
     Dec(GlobalContextCount);
@@ -1533,6 +1564,8 @@ begin
   finally
     inherited;
   end;
+  TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
+      FContextStopWatch.Elapsed);
 end;
 
 function TIsIndyTCPServerContext.TcpRef: TISIndyTCPSvrSession;
@@ -1552,7 +1585,10 @@ begin
       If FServer is TIsIndyApplicationServer then
         TIsIndyApplicationServer(FServer).AddSession(FTcpRef);
       if GblLogAllChlOpenClose then
+      Begin
+        ISIndyUtilsException(Self, '#Session Open ' + FTcpRef.TextID);
         FTcpRef.LogAMessage('Session Open');
+      End;
       if (FTcpRef.IOHandler <> Connection.IOHandler) then
         raise Exception.Create('Error FTcpRef.IOHandler<>Connection.IOHandler');
     end;
@@ -1784,10 +1820,10 @@ end;
 procedure TISIndyTCPSvrSession.ClearReferences;
 begin
   try
-  if FServerObject is TIsIndyApplicationServer then
-    TIsIndyApplicationServer(FServerObject).DropSession(Self);
-  if FServerObject <> nil then
-    ISIndyUtilsException(Self, 'Server not deleted in drop session');
+    if FServerObject is TIsIndyApplicationServer then
+      TIsIndyApplicationServer(FServerObject).DropSession(Self);
+    if FServerObject <> nil then
+      ISIndyUtilsException(Self, 'Server not deleted in drop session');
   except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'TISIndyTCPSvrSession.ClearReferences 1');
@@ -1896,7 +1932,8 @@ begin
   Inherited Create;
   ReadDataWaitDiv5 := 5000; // ms
   FCountTo80 := 0;
-  FNext80TransactionAllowance := now + cStart80TransactionAllowence;
+  FNext80TransactionAllowance := StopWatch.Elapsed.Add
+    (cStart80TransactionAllowence);
 end;
 
 destructor TISIndyTCPSvrSession.Destroy;
@@ -2143,7 +2180,8 @@ begin
   else if Pos(cIdleSecsOnServer, ACommand) = 1 then
   begin
     if FServerObject is TIsIndyApplicationServer then
-      Result := TIsIndyApplicationServer(FServerObject).fIdleTimePermitted.ToString
+      Result := TIsIndyApplicationServer(FServerObject)
+        .fIdleTimePermitted.ToString
     else
       Result := '-5555';
   End
@@ -2388,7 +2426,7 @@ begin
   Rtn := '';
   Key := '';
   try
-    if FPermittedIdleTime.ticks > 1 then
+    if FPermittedIdleTime.Ticks > 1 then
       FTimeOutAt := StartTime.Add(FPermittedIdleTime);
     Trans := ReadATransactionRecord(TrnctType, Key);
 {$IFNDEF  SuppressIPMetering}
@@ -2684,8 +2722,9 @@ end;
 procedure TISIndyTCPSvrSession.SetFullDuplex(Val: Boolean);
 begin
   if FCoupledSession <> nil then
-   if FCoupledSession.FCoupledSession = nil then
-    ISIndyUtilsException(Self, 'FullDup  FCoupledSession.FCoupledSession=nil Id=' + TextID);
+    if FCoupledSession.FCoupledSession = nil then
+      ISIndyUtilsException(Self,
+        'FullDup  FCoupledSession.FCoupledSession=nil Id=' + TextID);
 
   if fFullDuplex <> Val then
     if Val then
@@ -2841,7 +2880,7 @@ begin
   Begin
     Result := TIsIndyApplicationServer(FServerObject).ServerDetailsAsText;
   End;
-  Result := Result + 'This Session is ' + TextID + #13#10;
+  Result := Result + #13#10'This Session is ' + TextID + #13#10;
   if Assigned(FOnSimpleRemoteAction) then
     no := ''
   Else
@@ -2887,84 +2926,98 @@ end;
 
 { TBusyCheckCalls }
 
-constructor TBusyCheckCalls.Create(Const AAllowence: TDateTime;
+constructor TBusyCheckCalls.Create(Const AAllowence: TTimeSpan;
   Const AIpStr: string);
 begin
-  FIpStr := AIpStr;
-  FLastCall := now;
-  FAllowTo80 := now + AAllowence;
-  // FCountTo80 := 0;
-  if GblLogAllChlOpenClose then
-    ISIndyUtilsException(Self, 'NewBusyObject ' + TextData);
+  Try
+    FBusyWatch := TStopwatch.StartNew;
+    if FBusyWatch.IsHighResolution then
+      FBusyWatch.Start
+    else
+      ISIndyUtilsException(Self, 'Not FBusyWatch.IsHighResolution');
+    FIpStr := AIpStr;
+    FLastCall := FBusyWatch.Elapsed;
+    FAllowTo80 := FLastCall.Add(AAllowence);
+    // FCountTo80 := 0;
+    if GblLogAllChlOpenClose then
+      ISIndyUtilsException(Self, 'NewBusyObject ' + TextData);
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'NewBusyObject ' + TextData);
+  End;
 end;
 
-function TBusyCheckCalls.NotTooBusy(const AAllowance: TDateTime): Boolean;
+destructor TBusyCheckCalls.Destroy;
+begin
+  TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
+    FBusyWatch.Elapsed);
+  inherited;
+end;
+
+function TBusyCheckCalls.NotTooBusy(const AAllowance: TTimeSpan): Boolean;
 var
   s: string;
-  LocalAllocationTime, TM: TDateTime;
+  LocalAllocationTime, TM: TTimeSpan;
 begin
   Result := True;
   Inc(FCountTo80);
   Inc(FTotalCalls);
-  TM := now;
+  TM := FBusyWatch.Elapsed;
   if FCountTo80 > 80 then
   begin
     FCountTo80 := 0;
-    s := 'Total Calls=' + IntToStr(FTotalCalls) + ' Time is ' +
-      FormatDateTime('nn:ss.z', TM) + crlf + '     80 calls in ' +
-      FormatDateTime('nn:ss.z', TM - FAllowTo80) + crlf +
-      '     Min Time for 80 calls is ' + FormatDateTime('ss.zzz', AAllowance) +
-      ' seconds';
+    s := 'Total Calls=' + IntToStr(FTotalCalls) + ' Time Elapsed is ' +
+      TM.ToString + crlf + '     80 calls in ' + TM.Subtract(FAllowTo80)
+      .ToString + crlf + '     Min Time for 80 calls is ' + AAllowance.ToString;
     s := FIpStr + crlf + s;
     if GblLogAllChlOpenClose then
-      ISIndyUtilsException(Self, 'FcountTo80 At ' + FormatDateTime('nn:ss.z',
-        TM) + crlf + s);
+      ISIndyUtilsException(Self, 'FCountTo80 At ' + FormatDateTime('nn:ss.z',
+        now) + crlf + s);
     if TM > FAllowTo80 then
     begin
-      s := FormatDateTime('hh:nn:ss.zzz', TM) + '= Tm > FAllowTo80 =' +
-        FormatDateTime('hh:nn:ss.zzz', FAllowTo80);
+      s := TM.ToString + '= Tm > FAllowTo80 =' + FAllowTo80.ToString;
+      s := s + ' #Is not too busy';
       if GblLogAllChlOpenClose then
         ISIndyUtilsException(Self, s);
     end
     else
     begin
-      s := FormatDateTime('hh:nn:ss.zzz', TM) + '= Tm < FAllowTo80 =' +
-        FormatDateTime('hh:nn:ss.zzz', FAllowTo80);
+      s := TM.ToString + '= Tm < FAllowTo80 =' + FAllowTo80.ToString;
+      s := s + ' #Is too busy';
       if GblLogAllChlOpenClose then
         ISIndyUtilsException(Self, s);
       Result := false;
       LocalAllocationTime := FAllowTo80;
       if GblLogAllChlOpenClose then
         ISIndyUtilsException(Self, FIpStr + ':# Svr Busy FcountTo80 gap ' +
-          FormatDateTime('nn.ss.z', now - LocalAllocationTime));
-      if GblLogAllChlOpenClose then
-        ISIndyUtilsException(Self, FIpStr + ':# Svr Busy will Release at ' +
-          FormatDateTime('nn:ss.zzz ', LocalAllocationTime));
-      while now < LocalAllocationTime do
+          TM.Subtract(LocalAllocationTime).ToString);
+
+      while TM < LocalAllocationTime do
       begin
+        if GblLogAllChlOpenClose then
+          ISIndyUtilsException(Self, FIpStr + ':# Svr Busy Released in ' +
+            TM.Subtract(LocalAllocationTime).ToString);
         // must be local as other threads will do check busy
         Sleep(2000); // hold thread for two seconds
-        if now < LocalAllocationTime then
-          ISIndyUtilsException(Self, FIpStr + ':# Waiting till' +
-            FormatDateTime('nn:ss.zzz ', LocalAllocationTime));
+        TM := FBusyWatch.Elapsed;
+        if TM < LocalAllocationTime then
+          ISIndyUtilsException(Self, FIpStr + ':# Waiting');
       end;
     end;
-    FAllowTo80 := now + AAllowance;
-    if GblLogAllChlOpenClose then
-      ISIndyUtilsException(Self, '# Next Allocation ' +
-        FormatDateTime('hh:nn:ss.zzz', FAllowTo80) + ' = ' +
-        FormatDateTime('hh:nn:ss.zzz', now) + ' Plus ' +
-        FormatDateTime('hh:nn:ss.zzz', AAllowance));
+    FAllowTo80 := TM.Add(AAllowance);
   end;
   FLastCall := TM;
 end;
 
 function TBusyCheckCalls.TextData: String;
+Var
+  TM: TTimeSpan;
 begin
+  TM := FBusyWatch.Elapsed;
   Result := FIpStr + ' Total Calls =' + IntToStr(FTotalCalls) + crlf +
     '(80) Count Now =' + IntToStr(FCountTo80) + crlf + 'Last Call =' +
-    FormatDateTime('hh:nn:ss.zzz', FLastCall) + crlf + '80 not Before =' +
-    FormatDateTime('hh:nn:ss.zzz', FAllowTo80) + crlf;
+    FLastCall.Subtract(TM).ToString + crlf + '80 not Before =' +
+    FAllowTo80.Subtract(TM) + crlf;
 end;
 
 { TIsMonitorTCPAppServer.TTstThrd }

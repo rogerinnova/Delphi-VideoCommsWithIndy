@@ -9,7 +9,7 @@
         <Projects Include="VideoPresentationExamples\FMXImageDemo.dproj">
             <Dependencies/>
         </Projects>
-        <Projects Include="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\VCLApplicationSrver.dproj">
+        <Projects Include="VideoCommsExamples\VCLApplicationSrver.dproj">
             <Dependencies/>
         </Projects>
         <Projects Include="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\TCPApplicationsDemoService.dproj">
@@ -60,13 +60,13 @@
         <MSBuild Projects="VideoPresentationExamples\FMXImageDemo.dproj" Targets="Make"/>
     </Target>
     <Target Name="VCLApplicationSrver">
-        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\VCLApplicationSrver.dproj"/>
+        <MSBuild Projects="VideoCommsExamples\VCLApplicationSrver.dproj"/>
     </Target>
     <Target Name="VCLApplicationSrver:Clean">
-        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\VCLApplicationSrver.dproj" Targets="Clean"/>
+        <MSBuild Projects="VideoCommsExamples\VCLApplicationSrver.dproj" Targets="Clean"/>
     </Target>
     <Target Name="VCLApplicationSrver:Make">
-        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\VCLApplicationSrver.dproj" Targets="Make"/>
+        <MSBuild Projects="VideoCommsExamples\VCLApplicationSrver.dproj" Targets="Make"/>
     </Target>
     <Target Name="TCPApplicationsDemoService">
         <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\TCPApplicationsDemoService.dproj"/>

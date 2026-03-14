@@ -508,7 +508,8 @@ begin
         sz := TFile.GetSize(FFileName);
 {$Else}
         Try
-         FFileStm:=TFile.Create(FFileName,fmOpenRead);
+         FFileStm:=TFileStream.Create(FFileName, fmOpenRead or
+        fmShareDenyNone);  //fmOpenread ??? deletes file???
          sz := FFileStm.Seek(Int64(0), soFromEnd);
         Finally
          FreeAndNil(FFileStm);
@@ -615,8 +616,11 @@ begin
       Inc(FLastLoggedRepeat);
       FLastLoggedTime := Now;
       if FLastLoggedRepeat > 500 then
-        if FLastLogMessage<> '500 Repeats Logged' then
-          LogAline('500 Repeats Logged');
+        Begin
+//        FLastLoggedRepeat:=0; Reset by this message
+        if FLastLogMessage<> '500 #Repeats Logged' then
+          LogAline('500 #Repeats Logged');
+        End;
       Exit;
     End;
 

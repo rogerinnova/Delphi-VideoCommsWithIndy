@@ -12,7 +12,8 @@ uses
   System.SysUtils,
   System.Classes,
   System.TimeSpan,
-  System.Diagnostics;
+  System.Diagnostics,
+  IsLogging;
 
 type
 
@@ -32,6 +33,7 @@ type
     Class Procedure RecordObjectLifeTimeOnDestroy(AObjClosing: Tobject;
       ADuration: TTimeSpan);
     Class Function SingletonLifeTimeStats: string;
+    Class Procedure ReleaseSingletonTimeStats;
   End;
 
   TLifeTimeStats = Class(Tobject)
@@ -42,7 +44,7 @@ type
     FRunningAverageSecs, FSumOfSquaresSecs: Double;
   Public
     Constructor Create(AName: String);
-    Procedure AddData(AClassName: String; ADuration: TTimeSpan);
+    Procedure AddData(ADuration: TTimeSpan);
     Function StatsReport: string;
   End;
 
@@ -52,7 +54,7 @@ uses IsNavUtils, ISIndyUtils;
 
 { TLifeTimeStats }
 
-procedure TLifeTimeStats.AddData(AClassName: String; ADuration: TTimeSpan);
+procedure TLifeTimeStats.AddData(ADuration: TTimeSpan);
 Var
   SampleSeconds: Double;
 begin
@@ -79,16 +81,17 @@ begin
   if FMaxSecs > 0.0000000000001 then
   Begin
     SD := (CalDoubleStdDevFromSumOfSquares(FSumOfSquaresSecs, FCount));
-    Result := FObjectName;
+    Result := #13#10 + FObjectName;
     if SD > 0.0000000001 then
-      Result := Result + #13#10' Read ' + FormatFloat('###0.000 Secs',
-        FRunningAverageSecs) + ' Max' + FormatFloat('(0.000)', FMaxSecs) +
-        ' Min' + FormatFloat('(0.000)', FMinSecs) + ' SD' +
-        FormatFloat('(0.00000)', SD)
+      Result := Result + #13#10 + IntToStr(FCount) + ' Objects Ave Life ' +
+        FormatFloat('###0.000 Secs', FRunningAverageSecs) + ' Max' +
+        FormatFloat('(0.000)', FMaxSecs) + ' Min' + FormatFloat('(0.000)',
+        FMinSecs) + ' SD' + FormatFloat('(0.00000)', SD)
     Else
-      Result := Result + #13#10' Read ' + FormatFloat('###0.000 Secs',
-        FRunningAverageSecs) + ' Max' + FormatFloat('(0.000)', FMaxSecs) +
-        ' Min' + FormatFloat('(0.000)', FMinSecs);
+      Result := Result + #13#10 + IntToStr(FCount) + ' Objects Ave Life ' +
+        FormatFloat('###0.000 Secs', FRunningAverageSecs) + ' Max' +
+        FormatFloat('(0.000)', FMaxSecs) + ' Min' + FormatFloat('(0.000)',
+        FMinSecs);
   End;
 end;
 
@@ -118,6 +121,9 @@ begin
     ThisClassObj := TLifeTimeStats.Create(ThisClassName);
     FDataList.AddObject(ThisClassObj.FObjectName, ThisClassObj);
   End;
+
+  if ThisClassObj <> nil then
+    ThisClassObj.AddData(ADuration);
 end;
 
 constructor TObjTimeSpanRecording.Create;
@@ -129,10 +135,23 @@ begin
 end;
 
 destructor TObjTimeSpanRecording.Destroy;
+Var
+  Msg: string;
+  LogFin: TLogFile;
+
 begin
   if GlobalRecording <> nil then
     if GlobalRecording = self then
-      GlobalRecording := nil;
+    begin
+      LogFin := TLogFile.Create(ExceptionLogName, true, 5000000, true, false);
+      Try
+        Msg := TSingletonObjTimeSpanRecording.SingletonLifeTimeStats;
+        LogFin.LogALine('TObjTimeSpanRecording.Destroy'#13#10 + Msg);
+      Finally
+        LogFin.Free;
+        GlobalRecording := nil;
+      End;
+    end;
   FDataList.Free;
   inherited;
 end;
@@ -141,7 +160,7 @@ function TObjTimeSpanRecording.ObjectLifeTimeStats: string;
 Var
   I: Integer;
 begin
-  Result := 'Object Life Time Stats';
+  Result := #13#10'Object Life Time Stats';
   if (FDataList = nil) or (FDataList.Count < 1) then
     Exit;
 
@@ -170,6 +189,12 @@ begin
     GlobalRecording.AddCount(AObjClosing, ADuration);
 end;
 
+class procedure TSingletonObjTimeSpanRecording.ReleaseSingletonTimeStats;
+begin
+  if GlobalRecording <> nil then
+    FreeAndNil(GlobalRecording);
+end;
+
 class function TSingletonObjTimeSpanRecording.SingletonLifeTimeStats: string;
 begin
   if GlobalRecording <> nil then
@@ -177,5 +202,15 @@ begin
   Else
     Result := 'No Lifetime Stats Collected';
 end;
+
+Initialization
+
+  ;
+
+Finalization
+
+  ;
+if GlobalRecording <> nil then
+  TSingletonObjTimeSpanRecording.ReleaseSingletonTimeStats;
 
 end.

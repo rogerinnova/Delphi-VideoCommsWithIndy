@@ -223,6 +223,7 @@ function TVideoComsChannel.DoFullDuplexIncomingAction
   (AData: AnsiString): Boolean;
 Var
   TstTmStmp: TTimeRec; // Temp until all senders suport TTimeRec;
+  StageComplete: AnsiString;
 {$IFDEF UseVCLBITMAP}
   BitMap: TGraphic;
   // Class Function RecoverGraphic(AData: AnsiString): TGraphic;
@@ -240,6 +241,7 @@ begin
     Else
       FVideoInRptCount := 50;
 {$ENDIF}
+  StageComplete := 'Start';
   Try
     Result := true;
     case DecodeMediaCommand(FLastPayload, AData) of
@@ -259,14 +261,17 @@ begin
         End;
       AcceptFMXBitmap:
         begin
+          StageComplete := 'Start AcceptFMXBitmap';
           FLastRxOrAcknowledgeGraphic := FLastDuplexTime;
           If Assigned(FOnInComingGraphic) then
             if SynchronizeResults then
               SyncReturn(SyncedIncomingGraph)
             Else
             Begin
+              StageComplete := 'Start RecoverGraphic';
               BitMap := RecoverGraphic(FLastPayload);
               try
+                StageComplete := 'Start FOnInComingGraphic';
                 FOnInComingGraphic(BitMap);
               finally
                 FreeAndNil(BitMap);
@@ -277,12 +282,14 @@ begin
             If not TstTmStmp.DelayOfLessThan(10000) then
               LogTimeStampFail(AData, 'Fail Bitmap Timer::');
           FOpenGraphicChannelToActiveRx := true;
+          StageComplete := 'Start FOutGoingGraphicsRequested';
           If FOutGoingGraphicsRequested then
             If not OpenChannel then // respond with open traffic
               ISIndyUtilsException(Self, 'Open Channell Fail on' + TextID);
         end;
       CloseTxCircuit:
         Begin
+          StageComplete := 'Start CloseTxCircuit';
           If not TestTimeStamp(AData) then
             LogTimeStampFail(AData, 'Fail Close Traffic Timer CloseTxCircuit');
           Free;
@@ -298,7 +305,8 @@ begin
     end;
   Except
     On E: Exception do
-      ISIndyUtilsException(Self, E, 'DoFullDuplexIncomingAction>>' + E.Message);
+      ISIndyUtilsException(Self, E, 'DoFullDuplexIncomingAction>>' +
+        StageComplete);
   End;
 end;
 
