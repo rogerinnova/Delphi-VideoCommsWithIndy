@@ -1,0 +1,179 @@
+object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
+  Left = 480
+  Top = 240
+  Caption = 'Form2'
+  ClientHeight = 510
+  ClientWidth = 786
+  Position = Designed
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [Desktop]
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  Left = 480
+  Top = 240
+  DesignerMasterStyle = 0
+  object BtnEcho: TButton
+    Position.X = 153.000000000000000000
+    Position.Y = 129.000000000000000000
+    Size.Width = 80.000000000000000000
+    Size.Height = 29.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 22
+    Text = 'BtnEcho'
+    OnClick = BtnEchoClick
+  end
+  object ImgLocalCamera: TImageControl
+    EnableOpenDialog = False
+    Position.X = 8.000000000000000000
+    Position.Y = 8.000000000000000000
+    Size.Width = 137.000000000000000000
+    Size.Height = 153.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 2
+  end
+  object ImgSent: TImageControl
+    Anchors = [akLeft, akBottom]
+    EnableOpenDialog = False
+    Position.X = 8.000000000000000000
+    Position.Y = 382.000000000000000000
+    Size.Width = 81.000000000000000000
+    Size.Height = 120.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 4
+  end
+  object LblImagesSent: TLabel
+    Anchors = [akLeft, akTop, akRight]
+    AutoSize = True
+    Position.X = 8.000000000000000000
+    Position.Y = 344.000000000000000000
+    Size.Width = 770.000000000000000000
+    Size.Height = 16.000000000000000000
+    Size.PlatformDefault = False
+    Text = 'LblImagesSent'
+    TabOrder = 5
+  end
+  object Timer1: TTimer
+    OnTimer = Timer1Timer
+    Left = 304
+    Top = 32
+  end
+  object BtnReset: TButton
+    StyledSettings = [FontColor]
+    Position.X = 153.000000000000000000
+    Position.Y = 8.000000000000000000
+    Size.Width = 80.000000000000000000
+    Size.Height = 32.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 10
+    Text = 'BtnReset'
+    TextSettings.Font.Family = 'Roboto'
+    TextSettings.Font.Size = 16.000000000000000000
+    TextSettings.Font.StyleExt = {00020000000000000004000000}
+    OnClick = BtnResetClick
+  end
+  object BtnRestartLink: TButton
+    Anchors = [akLeft, akTop, akRight]
+    StyledSettings = [FontColor]
+    Position.X = 8.000000000000000000
+    Position.Y = 240.000000000000000000
+    Size.Width = 770.000000000000000000
+    Size.Height = 34.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 1
+    Text = 'BtnRestartLink'
+    TextSettings.Font.Family = 'Roboto'
+    TextSettings.Font.Size = 16.000000000000000000
+    TextSettings.Font.StyleExt = {00020000000000000004000000}
+    OnClick = BtnRestartLinkClick
+  end
+  object LblCamera: TLabel
+    Anchors = [akLeft, akTop, akRight]
+    Position.X = 8.000000000000000000
+    Position.Y = 169.000000000000000000
+    Size.Width = 761.000000000000000000
+    Size.Height = 25.000000000000000000
+    Size.PlatformDefault = False
+    Text = 'LblCamera'
+    TabOrder = 12
+  end
+  object CmbxServerSel: TComboBox
+    Anchors = [akLeft, akTop, akRight]
+    Position.X = 7.000000000000000000
+    Position.Y = 202.000000000000000000
+    Size.Width = 771.000000000000000000
+    Size.Height = 30.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 13
+  end
+  object EdtServerUrl: TEdit
+    Touch.InteractiveGestures = [LongTap, DoubleTap]
+    Anchors = [akLeft, akTop, akRight]
+    TabOrder = 15
+    Text = 'Server URL:port      '
+    TextSettings.Font.Family = 'Roboto'
+    TextSettings.Font.Size = 14.000000000000000000
+    TextSettings.Font.StyleExt = {00020000000000000004000000}
+    Position.X = 8.000000000000000000
+    Position.Y = 48.000000000000000000
+    Size.Width = 770.000000000000000000
+    Size.Height = 33.000000000000000000
+    Size.PlatformDefault = False
+    TextPrompt = 'Server   Url:port'
+    StyledSettings = [FontColor]
+  end
+  object BtnLinkStatus: TButton
+    Anchors = [akLeft, akTop, akRight]
+    StyledSettings = [FontColor]
+    Position.X = 8.000000000000000000
+    Position.Y = 282.000000000000000000
+    Size.Width = 770.000000000000000000
+    Size.Height = 38.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 17
+    Text = 'BtnLinkStatus'
+    TextSettings.Font.Family = 'Roboto'
+    TextSettings.Font.Size = 16.000000000000000000
+    TextSettings.Font.StyleExt = {00020000000000000004000000}
+    OnClick = BtnLinkStatusClick
+  end
+  object BtnLoadLog: TButton
+    Position.X = 153.000000000000000000
+    Position.Y = 89.000000000000000000
+    Size.Width = 80.000000000000000000
+    Size.Height = 32.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 19
+    Text = 'BtnLoadLog'
+    OnClick = BtnLoadLogClick
+  end
+  object MMoLogData: TMemo
+    Touch.InteractiveGestures = [Pan, LongTap, DoubleTap]
+    DataDetectorTypes = []
+    Align = Client
+    Size.Width = 509.000000000000000000
+    Size.Height = 480.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 20
+    Visible = False
+    Viewport.Width = 505.000000000000000000
+    Viewport.Height = 476.000000000000000000
+  end
+  object BtnCloseLog: TButton
+    Position.X = 258.000000000000000000
+    Position.Y = 8.000000000000000000
+    Size.Width = 80.000000000000000000
+    Size.Height = 32.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 0
+    Text = 'BtnCloseLog'
+    OnClick = BtnCloseLogClick
+  end
+  object BtnStopVideo: TButton
+    Position.X = 256.000000000000000000
+    Position.Y = 96.000000000000000000
+    TabOrder = 24
+    Text = 'BtnStopVideo'
+    OnClick = BtnStopVideoClick
+  end
+end

@@ -191,7 +191,7 @@
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
-        <DCCReference Include="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\FmDummyCammeraImages.pas">
+        <DCCReference Include="FmDummyCammeraImages.pas">
             <Form>FmDummyCamerraForTestingSrvr</Form>
             <FormType>fmx</FormType>
         </DCCReference>

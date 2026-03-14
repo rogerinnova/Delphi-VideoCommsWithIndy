@@ -3,7 +3,7 @@ program PrototypeWindowsOnlyDummyImagesForAppSrvr;
 uses
   System.StartUpCopy,
   FMX.Forms,
-  FmDummyCammeraImages in 'Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\FmDummyCammeraImages.pas' {FmDummyCamerraForTestingSrvr};
+  FmDummyCammeraImages in 'FmDummyCammeraImages.pas' {FmDummyCamerraForTestingSrvr};
 
 {$R *.res}
 
