@@ -1,0 +1,48 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{EB73DA83-4C27-4E90-98F6-86275712BD93}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="FlorenceDummyImagesForAppSrvr.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="..\VCLApplicationSrver.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="FlorenceDummyImagesForAppSrvr">
+        <MSBuild Projects="FlorenceDummyImagesForAppSrvr.dproj"/>
+    </Target>
+    <Target Name="FlorenceDummyImagesForAppSrvr:Clean">
+        <MSBuild Projects="FlorenceDummyImagesForAppSrvr.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="FlorenceDummyImagesForAppSrvr:Make">
+        <MSBuild Projects="FlorenceDummyImagesForAppSrvr.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="VCLApplicationSrver">
+        <MSBuild Projects="..\VCLApplicationSrver.dproj"/>
+    </Target>
+    <Target Name="VCLApplicationSrver:Clean">
+        <MSBuild Projects="..\VCLApplicationSrver.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="VCLApplicationSrver:Make">
+        <MSBuild Projects="..\VCLApplicationSrver.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="FlorenceDummyImagesForAppSrvr;VCLApplicationSrver"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="FlorenceDummyImagesForAppSrvr:Clean;VCLApplicationSrver:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="FlorenceDummyImagesForAppSrvr:Make;VCLApplicationSrver:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>

@@ -434,6 +434,9 @@ begin
     FCurSrvConnectionString := 'LocalHost:' + IntToStr(CListeningPort);
     FCurSrvAddress := 'LocalHost';
     FCurSrvListeningPort := CListeningPort;
+    BtnFollowOn.Enabled:=true;
+    BtnOffThreadFree.Enabled:=true;
+    BtnChkLinkState.Enabled:=true;
   End
   Else
   Begin
@@ -441,6 +444,9 @@ begin
     CmbxExtnalServerSel.Items.AddStrings(fKnownServers);
     AlignCurServerToComboBox;
     CmbxExtnalServerSel.Visible := True;
+    BtnFollowOn.Enabled:=false;
+    BtnOffThreadFree.Enabled:=false;
+    BtnChkLinkState.Enabled:=false;
   End;
 end;
 
@@ -786,7 +792,7 @@ begin
       try
         // File to server in this application
         ThisServerClient := TISIndyTCPClient.StartAccess(FCurSrvAddress,
-          CListeningPort);
+          FCurSrvListeningPort);
         ThisServerClient.PutLargeStreamToServer(TestFile,
           'Temp\NewTestUpload.txt');
         // putting in Temp directory enables overwrite if file exists
@@ -810,7 +816,7 @@ begin
         MmoInfo.Lines.Add(#13#10 + 'Duplex Client File Transfer');
         Try
           ThatServerClient := TISIndyTCPFullDuplexClient.StartAccess
-            (FCurSrvAddress, CListeningPort);
+            (FCurSrvAddress, FCurSrvListeningPort);
         Except
           ThatServerClient := nil;
         end;
@@ -1750,7 +1756,7 @@ begin
           i := Pos(CCameraLink, S);
           if i > 0 then
             LinkObj := ImageManager.ConnectChannel(S, FCurSrvAddress,
-              CListeningPort);
+              FCurSrvListeningPort);
         end;
       end;
   Except

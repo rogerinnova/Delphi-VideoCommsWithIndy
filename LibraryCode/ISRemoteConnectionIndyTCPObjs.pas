@@ -730,18 +730,20 @@ const
   // cRemoteLockIndicator:UInt32 = $AAAAAAAA;
 {$ENDIF}
 {$IFDEF NextGen}
+
+var
 {$IFNDEF  SuppressIPMetering}
-Function cIPTimedMetering: ansistring;
+  cIPTimedMetering: ansistring;
 {$ENDIF}
-Function cRemoteResetServer: ansistring;
-Function cRemoteServerDetails: ansistring;
-Function cRemoteServerConnections: ansistring;
-Function cRemoteServerDropCoupledSession: ansistring;
-Function cRemoteSetServerRelay: ansistring;
-Function cServerLink: ansistring;
-Function cNewIPLink: ansistring;
-Function cStartTimeStamp: ansistring;
-Function cEndTimeStamp: ansistring;
+  cRemoteResetServer: ansistring;
+  cRemoteServerDetails: ansistring;
+  cRemoteServerConnections: ansistring;
+  cRemoteServerDropCoupledSession: ansistring;
+  cRemoteSetServerRelay: ansistring;
+  cServerLink: ansistring;
+  cNewIPLink: ansistring;
+  cStartTimeStamp: ansistring;
+  cEndTimeStamp: ansistring;
 
 const
 {$ELSE}
@@ -793,8 +795,9 @@ Var
 {$IFDEF NEXTGEN}
   cApplicationHandshakeCodeString
     : String = 'Change This String Value to Restrict Access';
-Function cApplicationHandshakeCode: ansistring; inline;
+function cApplicationHandshakeCode: ansistring; inline;
 // ='Change This String Value to Restrict Access';
+function cIsLinkedOnServer: ansistring; inline;
 function CTransactionStart: AnsiChar; inline; // = '<';
 function CTransactionEnd: AnsiChar; inline; // = '>';
 {$ELSE}
@@ -864,61 +867,6 @@ const
   NullStrCodeInfo: StrCodeInfoRec = (CodePage: 0; ElementLength: 0; RefCount: 0;
     Length: 0);
 
-{$IFDEF NextGen}
-{$IFNDEF  SuppressIPMetering}
-
-Function cIPTimedMetering: ansistring;
-begin
-  Result := 'IPTimedMetering#';
-end;
-{$ENDIF}
-
-Function cRemoteResetServer: ansistring;
-Begin
-  Result := 'RemoteResetServer#';
-end;
-
-Function cRemoteServerDetails: ansistring;
-Begin
-  Result := 'RemoteServerDetails#';
-end;
-
-Function cRemoteServerDropCoupledSession: ansistring;
-begin
-  Result := 'RemoteServerDropCoupledSession#'
-end;
-
-Function cRemoteServerConnections: ansistring;
-begin
-  Result := 'RemoteServerConnections#';
-end;
-
-Function cRemoteSetServerRelay: ansistring;
-begin
-  Result := 'RemoteServerRelay#';
-end;
-
-Function cServerLink: ansistring;
-begin
-  Result := 'SV#';
-end;
-
-Function cNewIPLink: ansistring;
-begin
-  Result := 'IP#';
-end;
-
-Function cStartTimeStamp: ansistring;
-begin
-  Result := 'TStamp#';
-end;
-
-Function cEndTimeStamp: ansistring;
-begin
-  Result := 'ETStamp#';
-end;
-
-{$ENDIF}
 {$IFNDEF  SuppressIPMetering}
 
 Function SplitMeteredData(Var AData, AMeteredBit: ansistring): boolean;
@@ -935,7 +883,11 @@ begin
   Dec(Idx, 2); // Two Spaces;
   SplitLength := Length(AData) - Idx + 1;
   AMeteredBit := Copy(AData, Idx, SplitLength);
+{$IFDEF NextGen}
+  AData.Length := (Idx - 1);
+{$ELSE}
   SetLength(AData, Idx - 1);
+{$ENDIF}
 end;
 
 Function AddMeteredTimeRecAsString(Const AFlag: ansistring): ansistring;
@@ -966,8 +918,8 @@ Var
   Idx: integer;
   RefTime: TDateTime;
 Begin
+  Result := false;
   try
-    Result := false;
     RefTime := Now;
     DataArray := ArrayOfMeteredTimes(ADataIn);
     if Length(DataArray) < 1 then
@@ -986,6 +938,10 @@ Var
   Sz: integer;
   TimeData: TTimeRec;
   Idx, Nxt: integer;
+{$IFDEF NextGen}
+  SrchS: ansistring;
+  SrchChar,
+{$ENDIF}
   NxtChar, NxtStart, NxtEnd: PAnsiChar;
   s: ansistring;
   EndLength, TimeRecLength: integer;
@@ -997,8 +953,15 @@ Begin
   Idx := Pos(cIPTimedMetering, AData);
   If Idx < 1 then
     Exit;
+{$IFDEF NextGen}
+  SrchS := '#^';
+  SrchChar := SrchS;
+  NxtChar := PAnsiChar(AData[IsFirstChar]);
+  NxtChar := StrPos(NxtChar, SrchChar);
+{$ELSE}
   NxtChar := @AData[IsFirstChar];
   NxtChar := StrPos(NxtChar, '#^');
+{$ENDIF}
   if NxtChar <> nil then
     Inc(NxtChar, 2);
   If Idx < 2 then
@@ -1023,7 +986,11 @@ Begin
         Result[Idx].Flag := Result[Idx].Flag + NxtChar[0];
         Inc(NxtChar);
       end;
+{$IFDEF Nextgen}
+      s.Length := TimeRecLength;
+{$ELSE}
       SetLength(s, TimeRecLength);
+{$ENDIF}
       s := Copy(NxtStart, 0, TimeRecLength);
       If Result[Idx].TimeRec.FromTransString(s) then
         Inc(Idx);
@@ -1080,6 +1047,9 @@ end;
 Function BufferAsAnsi(AWriteBuffer: TIdBytes): ansistring;
 {$IFDEF NEXTGEN}
 begin
+ if AWriteBuffer=nil then
+  Result:=''
+ else
   Result.CopyBytesFromMemory(@AWriteBuffer[0], Length(AWriteBuffer));
 {$ELSE}
 Var
@@ -1267,6 +1237,11 @@ Function cApplicationHandshakeCode: ansistring; inline;
 begin
   Result := cApplicationHandshakeCodeString;
 end;
+
+function cIsLinkedOnServer: ansistring; inline;
+Begin
+  Result := 'IsThisChnlLinked#';
+End;
 {$ENDIF}
 {$IFDEF NEXTGEN}
 {$IFDEF Debug}
@@ -2235,7 +2210,7 @@ begin
   SendTransaction(SendData, Rtn, KeyTxt, Response);
   OffSet := Length(cIsLinkedOnServer);
   if (Length(Response) > OffSet) then
-    Result := Pos('CK#', Response) = OffSet;
+    Result := Pos(AnsiString('CK#'), Response) = OffSet;
 end;
 
 function TISIndyTCPClient.LogTextOnServer(AData: ansistring): ansistring;
@@ -2289,6 +2264,11 @@ begin
 {$ENDIF}
     // TRemoteDb.RecoverStartupKey(ss, FPersonality, NewKey,s);
     ss := cApplicationHandshakeCode;
+{$IFDEF DEBUG}
+{$IFDEF NEXTGEN}
+    WS2 := ss.AsString;
+{$ENDIF}
+{$ENDIF}
 {$IFDEF FPC}
     uniquestring(ss);
 {$ENDIF}
@@ -7077,6 +7057,21 @@ c30SecondsDateTime := TTimeSpan.FromSeconds(30);
 // = 0.5 / 24 / 60; // 40 Seconds
 cStart80TransactionAllowence := TTimeSpan.FromMilliseconds(5);
 // 1 / 24 / 60 / 60 / 200; // 5msec
+
+{$IFDEF NextGen}
+{$IFNDEF  SuppressIPMetering}
+cIPTimedMetering := 'IPTimedMetering#';
+{$ENDIF}
+cRemoteResetServer := 'RemoteResetServer#';
+cRemoteServerDetails := 'RemoteServerDetails#';
+cRemoteServerDropCoupledSession := 'RemoteServerDropCoupledSession#';
+cRemoteServerConnections := 'RemoteServerConnections#';
+cRemoteSetServerRelay := 'RemoteServerRelay#';
+cServerLink := 'SV#';
+cNewIPLink := 'IP#';
+cStartTimeStamp := 'TStamp#';
+cEndTimeStamp := 'ETStamp#';
+{$ENDIF}
 
 Finalization
 

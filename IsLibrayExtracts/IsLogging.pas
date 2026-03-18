@@ -956,9 +956,17 @@ begin
       CrtFile := TFileStream.Create(CreateName, FmCreate);
       Try
         s := LogDateStamp + #13#10;
+{$IfDef NextGen}
+        CrtFile.Write(s, s.Length);
+{$Else}
         CrtFile.Write(s[1], Length(s));
+{$Endif}
         s := 'Rolled File Prev Copy was ' + NewName + #13#10#13#10#13#10;
+{$IfDef NextGen}
+        CrtFile.Write(s, s.Length);
+{$Else}
         CrtFile.Write(s[1], Length(s));
+{$Endif}
       Finally
         CrtFile.Free;
       End;

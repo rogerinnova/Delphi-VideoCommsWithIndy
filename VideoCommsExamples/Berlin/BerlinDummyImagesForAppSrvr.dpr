@@ -1,9 +1,9 @@
-program PrototypeWindowsOnlyDummyImagesForAppSrvr;
+program BerlinDummyImagesForAppSrvr;
 
 uses
   System.StartUpCopy,
   FMX.Forms,
-  FmDummyCammeraImages in 'FmDummyCammeraImages.pas' {FmDummyCamerraForTestingSrvr};
+  FmDummyCammeraImages in '..\FmDummyCammeraImages.pas' {FmDummyCamerraForTestingSrvr};
 
 {$R *.res}
 

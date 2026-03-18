@@ -7,13 +7,13 @@ uses
   Graphics, Classes, SysUtils;
 {$ELSE}
 {$IFDEF UseVCLBITMAP}
-    System.Classes,
+  System.Classes,
   System.SysUtils,
   Vcl.Graphics,
   Vcl.Imaging.jpeg,
   Vcl.Imaging.pngimage;
 {$ELSE}
-   only for Vcl ? ? ? ?
+  only for Vcl ? ? ? ?
 {$ENDIF}
 {$ENDIF}
 
@@ -33,16 +33,17 @@ Type
     /// <summary>Analyzes the header to guess the image format of he given stream.</summary>
     class function GetVclGraphicObjFromStream(AStm: TStream): TGraphic;
   end;
-  {$IfDef FPC}
+{$IFDEF FPC}
+
   TPngImage = class(TPortableNetworkGraphic)
   end;
 
   TMetaFile = class(TGraphic)
-  //Dummy
+    // Dummy
 
-    end;
+  end;
 
-  {$Endif}
+{$ENDIF}
 
 implementation
 
@@ -89,8 +90,7 @@ const
 begin
   Result := nil;
   SetLength(LBuffer, MaxImageDataLength);
-  Rptr:= PAnsiChar(LBuffer);
-
+  Rptr := PAnsiChar(LBuffer);
 
   AStm.Position := 0;
   try
@@ -98,8 +98,8 @@ begin
     begin
       for I := Low(ImageData) to High(ImageData) do
       begin
-        if (CompareMem(@ImageData[I].Header[0], @LBuffer[0], ImageData[I].Length))
-        then
+        if (CompareMem(@ImageData[I].Header[0], @LBuffer[0],
+          ImageData[I].Length)) then
         begin
           Result := ImageData[I].ObjectType.Create;
           Break;

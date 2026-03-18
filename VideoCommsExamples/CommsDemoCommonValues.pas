@@ -2,7 +2,11 @@ unit CommsDemoCommonValues;
 
 interface
 
-Uses SysUtils, Classes;
+Uses SysUtils, Classes
+{$IFDEF Nextgen}
+    , IsNextGenPickup
+{$ENDIF}
+    ;
 
 Const
   CServiceListeningPort = 1777; // any value you choose
@@ -22,8 +26,8 @@ Const
     TCP and Specific Local Port=1777
     Allow the connection
   }
-  CCameraLink =  'CameraPics';
-  CDummyCameraLink =  CCameraLink + 'Dummy';
+  CCameraLink = 'CameraPics';
+  CDummyCameraLink = CCameraLink + 'Dummy';
 
 Function TestFileName: string;
 Procedure CreateTestFile;
@@ -64,7 +68,11 @@ Begin
     LineData := 'The Quick Brown Fox Jumps Over The Lazy Dogs Back' + #13#10;
     Data := PAnsiChar(LineData);
     for I := 0 to 50000 do
+{$IFDEF NextGen}
+      Data.WriteBytesToStrm(Strm, Length(LineData));
+{$ELSE}
       Strm.Write(Data[0], Length(LineData));
+{$ENDIF}
   Finally
     Strm.Free;
   End;

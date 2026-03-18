@@ -335,7 +335,7 @@ Var
   m, MStrm: TMemoryStream;
   GType: Word;
   GObject: TObject;
-  Sz: LongInt;
+  Sz: FixedInt;
   TimeStmp: TTimeRec;
 {$IFDEF UseVCLBITMAP}
   GraphicOut: TGraphic;

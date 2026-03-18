@@ -51,7 +51,7 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     Size.Height = 16.000000000000000000
     Size.PlatformDefault = False
     Text = 'LblImagesSent'
-    TabOrder = 5
+    TabOrder = 23
   end
   object Timer1: TTimer
     OnTimer = Timer1Timer
@@ -95,7 +95,7 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     Size.Height = 25.000000000000000000
     Size.PlatformDefault = False
     Text = 'LblCamera'
-    TabOrder = 12
+    TabOrder = 25
   end
   object CmbxServerSel: TComboBox
     Anchors = [akLeft, akTop, akRight]

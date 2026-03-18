@@ -1,0 +1,60 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{AB62EF4E-B982-4D2A-B561-505046792FB6}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="..\VCLApplicationSrver.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="AlexDummyImagesForAppSrvr.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="..\Alexandria64bit\Alex64DummyImagesForAppSrvr.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="VCLApplicationSrver">
+        <MSBuild Projects="..\VCLApplicationSrver.dproj"/>
+    </Target>
+    <Target Name="VCLApplicationSrver:Clean">
+        <MSBuild Projects="..\VCLApplicationSrver.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="VCLApplicationSrver:Make">
+        <MSBuild Projects="..\VCLApplicationSrver.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="AlexDummyImagesForAppSrvr">
+        <MSBuild Projects="AlexDummyImagesForAppSrvr.dproj"/>
+    </Target>
+    <Target Name="AlexDummyImagesForAppSrvr:Clean">
+        <MSBuild Projects="AlexDummyImagesForAppSrvr.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="AlexDummyImagesForAppSrvr:Make">
+        <MSBuild Projects="AlexDummyImagesForAppSrvr.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Alex64DummyImagesForAppSrvr">
+        <MSBuild Projects="..\Alexandria64bit\Alex64DummyImagesForAppSrvr.dproj"/>
+    </Target>
+    <Target Name="Alex64DummyImagesForAppSrvr:Clean">
+        <MSBuild Projects="..\Alexandria64bit\Alex64DummyImagesForAppSrvr.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="Alex64DummyImagesForAppSrvr:Make">
+        <MSBuild Projects="..\Alexandria64bit\Alex64DummyImagesForAppSrvr.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="VCLApplicationSrver;AlexDummyImagesForAppSrvr;Alex64DummyImagesForAppSrvr"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="VCLApplicationSrver:Clean;AlexDummyImagesForAppSrvr:Clean;Alex64DummyImagesForAppSrvr:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="VCLApplicationSrver:Make;AlexDummyImagesForAppSrvr:Make;Alex64DummyImagesForAppSrvr:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>

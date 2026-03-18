@@ -213,7 +213,7 @@ type
     Procedure DropSession(ASession: TISIndyTCPSvrSession);
     Procedure DropAllCurrentSessions; // On Closing server
   Protected
-    FSrvrStopWatch: TStopWatch;
+    FSrvrStopWatch: TStopwatch;
     procedure Shutdown; override;
     procedure AddLogMessage(ATextID, AMsg: String);
   Public
@@ -700,7 +700,7 @@ constructor TIsIndyApplicationServer.Create(AOwner: TComponent);
 Var
   LogStart: String;
 begin
-  FSrvrStopWatch:= TStopWatch.StartNew;
+  FSrvrStopWatch := TStopwatch.StartNew;
   FServerClosing := false;
   // Four Seconds;
   FTimeLimitFor80Transactions := cStart80TransactionAllowence;
@@ -760,7 +760,11 @@ end;
 destructor TIsIndyApplicationServer.Destroy;
 begin
   Try
-    ISIndyUtilsException(Self, 'Start Destroy Srv: ' + IntToStr(DefaultPort));
+    Try
+      ISIndyUtilsException(Self, 'Start Destroy Server: ');
+      ISIndyUtilsException('', ServerDetailsAsText);
+    Except
+    End;
     DropAllCurrentSessions;
     ISIndyUtilsException(Self, 'DropAllSessions');
     fCurrentSessionObjects.Free;
@@ -787,7 +791,7 @@ begin
       ISIndyUtilsException(Self, E, 'Destroy.Inherited');
   end;
   TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
-      FSrvrStopWatch.Elapsed);
+    FSrvrStopWatch.Elapsed);
 end;
 
 procedure TIsIndyApplicationServer.DropAllCurrentSessions;
@@ -880,8 +884,8 @@ end;
 
 function TIsIndyApplicationServer.GetMaxCallsPerMinute: Integer;
 begin
-  if FTimeLimitFor80Calls.Ticks<FTimeLimitFor80Calls.TicksPerMillisecond  then
-     FTimeLimitFor80Calls:= TTimeSpan.FromMilliseconds(2);
+  if FTimeLimitFor80Calls.Ticks < FTimeLimitFor80Calls.TicksPerMillisecond then
+    FTimeLimitFor80Calls := TTimeSpan.FromMilliseconds(2);
   Result := Round(80 / FTimeLimitFor80Calls.TotalMinutes);
 end;
 
@@ -1266,7 +1270,7 @@ end;
 
 procedure TIsIndyApplicationServer.LoadServerIniData;
 Var
-  IdleSeconds,MxCallsPmin: Integer;
+  IdleSeconds, MxCallsPmin: Integer;
   IniFile: TIniFile;
   IniFileName: String;
 begin
@@ -1289,12 +1293,11 @@ begin
           IniFile.WriteInteger('TCP', 'IdleTimeInSeconds', IdleSeconds);
         end;
         fIdleTimePermitted := TTimeSpan.FromSeconds(IdleSeconds);
-        MxCallsPmin:=IniFile.ReadInteger('TCP','MaxCallsPerMin',-1);
-        if MxCallsPmin>0 then
-          MaxCallsPerMinute:=MxCallsPmin
-         else
-          if MxCallsPmin<0 then
-           IniFile.WriteInteger('TCP','MaxCallsPerMin',0);
+        MxCallsPmin := IniFile.ReadInteger('TCP', 'MaxCallsPerMin', -1);
+        if MxCallsPmin > 0 then
+          MaxCallsPerMinute := MxCallsPmin
+        else if MxCallsPmin < 0 then
+          IniFile.WriteInteger('TCP', 'MaxCallsPerMin', 0);
       finally
         IniFile.Free;
       end;
@@ -1440,7 +1443,7 @@ end;
 
 procedure TIsIndyApplicationServer.SetMaxCallsperminute(AValue: Integer);
 begin
-  FTimeLimitFor80Calls:=TTimeSpan.FromMinutes(80 / AValue);
+  FTimeLimitFor80Calls := TTimeSpan.FromMinutes(80 / AValue);
 end;
 
 procedure TIsIndyApplicationServer.Shutdown;
@@ -1448,14 +1451,14 @@ Var
   ClosingTimer: TStopwatch;
 begin
   try
-  ClosingTimer:=TStopwatch.StartNew;
-  FServerClosing := True;
-  inherited;
-  ISIndyUtilsException(Self, '# Time To Shutdown =' +
-    ClosingTimer.Elapsed.ToString);
+    ClosingTimer := TStopwatch.StartNew;
+    FServerClosing := True;
+    inherited;
+    ISIndyUtilsException(Self, '# Time To Shutdown =' +
+      ClosingTimer.Elapsed.ToString);
   Except
-   On E:Exception do
-     ISIndyUtilsException(self,E,'On ShutDown');
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'On ShutDown');
   End;
 end;
 
@@ -1526,7 +1529,7 @@ constructor TIsIndyTCPServerContext.Create(AConnection: TIdTCPConnection;
 begin
   FContextStopWatch := TStopwatch.StartNew;
   if FContextStopWatch.IsHighResolution then
-//    FContextStopWatch.Start
+    // FContextStopWatch.Start
   else
     ISIndyUtilsException(Self, 'Not FContextStopWatch.IsHighResolution');
 {$IFNDEF  SuppressIPMetering}
@@ -1565,7 +1568,7 @@ begin
     inherited;
   end;
   TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
-      FContextStopWatch.Elapsed);
+    FContextStopWatch.Elapsed);
 end;
 
 function TIsIndyTCPServerContext.TcpRef: TISIndyTCPSvrSession;

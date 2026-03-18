@@ -8,6 +8,9 @@ interface
 uses
   System.SysUtils, System.Types, System.UITypes, System.Classes,
   System.Variants, IniFiles, IsProcCl,
+{$IFDEF NEXTGEN}
+  IsNextGenPickup,
+{$ENDIF}
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   IsMediaCommsObjs, CommsDemoCommonValues, FMX.Controls.Presentation,
   FMX.StdCtrls, FMX.Media, ISRemoteConnectionIndyTCPObjs,
@@ -521,8 +524,13 @@ begin
       Log := TFileStream.Create(ExceptionLogName, fmOpenRead, fmShareDenyNone);
       try
         Sz := Log.Size;
+{$IFDEF NextGen}
+        s.Length:=Sz;
+        Log.Read(S, Sz);
+{$ELSE}
         SetLength(S, Sz);
         Log.Read(S[1], Sz);
+{$ENDIF}
         MMoLogData.Text := 'Log File Data' + crlf + S;
       finally
         Log.Free;
