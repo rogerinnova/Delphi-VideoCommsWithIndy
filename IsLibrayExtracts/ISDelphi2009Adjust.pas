@@ -60,13 +60,14 @@ procedure DateTimeToString(var Result: Ansistring; const Format: string;
   end;
 
 function AnsiPos(const Substr, S: Ansistring): Integer;
+{$IFDEF NextGen}
+ Begin
+   Result:= Pos(SubStr,S);
+{$ELSE}
 var
   P: PAnsiChar;
 begin
   Result := 0;
-{$IFDEF NextGen}
-   Result:= Pos(SubStr,S);
-{$ELSE}
   P := AnsiStrPos(PAnsiChar(S), PAnsiChar(SubStr));
   if P <> nil then
     Result := (Integer(P) - Integer(PAnsiChar(S))) + 1;

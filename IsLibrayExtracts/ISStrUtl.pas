@@ -852,11 +852,12 @@ End;
 
 function SepStrg(var aStrg: PAnsiChar; ASep: AnsiString): AnsiString;
 { Returns ansistring and pointer to next field (Var AStrg) in AnsiString }
+{$IFNDEF NextGen}
 var
   CharPointer: PAnsiChar;
   lrslt, lsep, i: Integer;
   Fnd: Boolean;
-
+{$Endif}
 begin
 {$IFDEF NextGen}
   Result := aStrg.SepStrg(ASep);
@@ -1123,10 +1124,11 @@ end;
 {$ENDIF}
 
 function FieldSep(var ss: PAnsiChar; SepVal: Ansichar): AnsiString;
+{$IFNDEF NextGen}
 var
   CharPointer: PAnsiChar;
   j: Integer;
-
+{$Endif}
 begin
 {$IFDEF NextGen}
   Result := ss.FieldSep(SepVal);
@@ -2312,8 +2314,10 @@ function StreamAsStringLimitLen(AStrm: TStream;
   AMaxSz, ASoFromEndBegin: Integer): AnsiString;
 var
   Sz: int64;
+{$IFNDEF NextGen}
   st: LongInt;
   Rptr: PAnsiChar;
+{$Endif}
 begin
   Sz := AStrm.seek(0, TSeekOrigin.soEnd);
   if (AMaxSz > 20000000) and (Sz > 20000000) then
@@ -2339,8 +2343,10 @@ end;
 function StreamAsString(AStrm: TStream): AnsiString;
 var
   Sz: int64;
+{$IFNDEF NextGen}
   st: LongInt;
   Rptr: PAnsiChar;
+{$ENDIF}
 begin
   Sz := AStrm.Size;
   if Sz > 20000000 then
@@ -2364,8 +2370,10 @@ begin
 end;
 
 procedure StringAsStrm(AData: AnsiString; AStm: TStream);
+{$IFNDEF NextGen}
 var
   B: PAnsiChar;
+{$ENDIF}
 begin
   if AStm = nil then
     Exit;
@@ -6199,15 +6207,18 @@ Function ExtractIncNextPercentHex(Var APchr: PAnsiChar): String;
   end;
 
 Var
-  NxtPerCentChr, NxtPerCentChrNo2: PAnsiChar;
+  NxtPerCentChr: PAnsiChar;
   AnsiBit: AnsiString;
+  FirstBitString: String;
 {$IFNDEF NextGen}
+  NxtPerCentChrNo2: PAnsiChar;
   NxtBit, NxtBitNo2: AnsiString;
   Utf8Bit: UTF8String;
-{$ENDIF}
-  FirstBitLen, BitVal: Integer;
-  NewString, FirstBitString: String;
+  NewString: String;
   HexCode: Boolean;
+  BitVal,
+  FirstBitLen: Integer;
+{$ENDIF}
 
 Begin
   Result := '';

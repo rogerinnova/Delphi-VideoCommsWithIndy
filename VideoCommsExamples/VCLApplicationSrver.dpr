@@ -15,11 +15,13 @@ uses
 {$R *.res}
 
 begin
+{$IfDef Debug}
 {$IFDEF TestFastMM}
   LoadFastMMfromISLib(True, True, false, false, True);
 {$ELSE}
   ReportMemoryLeaksOnShutdown := True;
 {$ENDIF}
+{$EndIf}
   Application.Initialize;
   Application.MainFormOnTaskbar := True;
   Application.CreateForm(TServerForm, ServerForm);

@@ -359,10 +359,12 @@ Var
   I, TxLen, ImagesSent, ProgressMsgCount: integer;
   StartTime: TDateTime;
 begin
+  StartTime := now;
+  ProgressMsgCount := 50;
+  ImagesSent := 0;
   Try
     while not Terminated do
       try
-        ImagesSent := 0;
         FImgTxThrdLock.Acquire;
         try
 {$IFDEF NextGen}
@@ -576,7 +578,8 @@ end;
 
 procedure TIsMediaCapture.AlignAspectRatioOfComsBitmpTo(AData: TBitmap);
 Var
-  AspectRatio, SzRef, SzRefRslt: Double;
+//  AspectRatio,
+  SzRef, SzRefRslt: Double;
 begin
   if SameValue(AData.Height, FComsBitmapHeight, 0.001) and
     SameValue(AData.Width, FComsBitmapWidth, 0.001) then
@@ -587,7 +590,7 @@ begin
     Exit;
 
   FreeAndNil(FComsBitMap);
-  AspectRatio := AData.Height / AData.Width;
+//  AspectRatio := AData.Height / AData.Width;
   SzRef := AData.Height * AData.Width; // Area pixels
   SzRefRslt := FComsBitmapHeight * FComsBitmapWidth;
   SzRefRslt := SqRt(SzRefRslt / SzRef);
@@ -1292,8 +1295,6 @@ begin
 end;
 
 destructor TIsCaptureTstThread.Destroy;
-Var
-  ss: string;
 begin
   Try
     Dec(GlobalThreadCount);
@@ -1500,8 +1501,6 @@ begin
 end;
 
 Procedure GblMobileMediaCaptureFinalize;
-Var
-  s: string;
 Begin
   Try
     LocalMediaCaptureDevices.Free;

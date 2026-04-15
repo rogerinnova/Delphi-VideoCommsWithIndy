@@ -372,16 +372,17 @@ end;
 
 function PurgeFileStrmOverSz(AFileStream: TFileStream;
   ALimitSz: Integer): Boolean;
-var
-  MemStream: TMemoryStream;
-  OldSz: Int64;
-  ToCopy: Int64;
-  s: AnsiString;
+//var
+//  MemStream: TMemoryStream;
+//  OldSz: Int64;
+//  ToCopy: Int64;
+//  s: AnsiString;
 
 begin
   raise Exception.Create
     ('Not sure PurgeFileStrmOverSz does what we want it to');
 
+(*
   Result := false;
   if ALimitSz < 1000 then
     raise Exception.Create('PurgeFileStrmOverSz too small');
@@ -416,6 +417,7 @@ begin
     on E: Exception do
       raise Exception.Create('PurgeFileStrmOverSz::' + E.Message);
   end;
+*)
 end;
 
 { TLogFile }
@@ -939,9 +941,10 @@ var
 begin
   If FInRollLogFile then
     Exit;
+
+  WillDisAbleLogging := FDisAbleLogging;
   try
     FInRollLogFile := true;
-    WillDisAbleLogging := FDisAbleLogging;
     FLock.Acquire;
     try
       FDisAbleLogging := false;

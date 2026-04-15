@@ -12,6 +12,9 @@
         <Projects Include="..\Alexandria64bit\Alex64DummyImagesForAppSrvr.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="..\TCPApplicationsDemoService.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -47,14 +50,23 @@
     <Target Name="Alex64DummyImagesForAppSrvr:Make">
         <MSBuild Projects="..\Alexandria64bit\Alex64DummyImagesForAppSrvr.dproj" Targets="Make"/>
     </Target>
+    <Target Name="TCPApplicationsDemoService">
+        <MSBuild Projects="..\TCPApplicationsDemoService.dproj"/>
+    </Target>
+    <Target Name="TCPApplicationsDemoService:Clean">
+        <MSBuild Projects="..\TCPApplicationsDemoService.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="TCPApplicationsDemoService:Make">
+        <MSBuild Projects="..\TCPApplicationsDemoService.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="VCLApplicationSrver;AlexDummyImagesForAppSrvr;Alex64DummyImagesForAppSrvr"/>
+        <CallTarget Targets="VCLApplicationSrver;AlexDummyImagesForAppSrvr;Alex64DummyImagesForAppSrvr;TCPApplicationsDemoService"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="VCLApplicationSrver:Clean;AlexDummyImagesForAppSrvr:Clean;Alex64DummyImagesForAppSrvr:Clean"/>
+        <CallTarget Targets="VCLApplicationSrver:Clean;AlexDummyImagesForAppSrvr:Clean;Alex64DummyImagesForAppSrvr:Clean;TCPApplicationsDemoService:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="VCLApplicationSrver:Make;AlexDummyImagesForAppSrvr:Make;Alex64DummyImagesForAppSrvr:Make"/>
+        <CallTarget Targets="VCLApplicationSrver:Make;AlexDummyImagesForAppSrvr:Make;Alex64DummyImagesForAppSrvr:Make;TCPApplicationsDemoService:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

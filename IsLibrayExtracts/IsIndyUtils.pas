@@ -387,9 +387,6 @@ End;
 
 Function InitialiseExceptionLog(ALogName: string; AStartNewLogFile: boolean)
   : TLogFile;
-Var
-  Extn: String;
-
 Begin
   If ALogName = '' then
     ALogName := ExceptionLogName;

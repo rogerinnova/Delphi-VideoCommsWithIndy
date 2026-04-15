@@ -154,6 +154,8 @@ Type
 
   TISIndyTCPBase = Class(TObject)
   Private
+    FThreadID:TThreadID;
+    FReadInMainThread:Boolean;
     FIOHandler: TIdIOHandler;
     fPeerPort, FPort: TIdPort;
     fPeerIP, FIP: String;
@@ -161,6 +163,7 @@ Type
     FFileAccessBasePath: String;
     FFullDupLogList, FLogList: TStringlist;
     FLoggingListLock: TCriticalSection; // For async Log messages
+    FTotalSessionRead:Int64;
     FLogsMissed: integer;
     FLastData: ansistring;
     FConnectionCounted: boolean;
@@ -177,10 +180,24 @@ Type
     procedure SetPort(const Value: TIdPort); Virtual;
     procedure SetFileAccessBasePath(const Value: String);
     function GetLocalPort: TIdPort;
+    procedure DecodeIndyTCPBaseTransStart(Const ABuffer: array of Byte;
+      ACharsRead: integer; out ATransactionSize: Longword;
+      out AKey, ANewData: ansistring);
+    Procedure RecoverReadPosition(var ABuffer: TIdBytes; ACharsRead: integer;
+      out ATransactionSize: Longword; out AKey, ANewData: ansistring);
+    Function IsValid(AStartOffset, ABufNxt: integer; Var ABuffer: TIdBytes;
+      ACharsRead: integer; out ATransactionSize: Longword;
+      out AKey, ANewData: ansistring): boolean;
   Protected
     FNextWriteBusyDate, FNextReadBusyDate: TTimeSpan;
     FDecWriteCount, FDecReadCount: integer;
     FConnection: TIdTCPConnection;
+    // Keep Last Data
+    CopyPz: integer;
+    FLastTransactionSz: ansistring;
+    FLastTransactionKey: ansistring;
+    FLastTransactionEnd: ansistring;
+    // Keep Last Data
     FNextTransactionData: ansistring;
     FReadDataWaitDiv5: integer;
     FLastLoggedTimeStampError, FLastDuplexTime, FLastIncoming: TTimeSpan;
@@ -193,7 +210,8 @@ Type
     FOnSimpleDuplexRemoteAction: TComandActionAnsi;
     FOnDestroy: TISIndyTCPEvent;
     FChnlStopWatch: TStopWatch;
-    Procedure SyncReturn(AMeathod: TThreadMethod); Virtual;
+    Procedure SyncReturn(AMethod: TThreadMethod); Virtual;
+    function TextThreadDetails:String;
     function GetIPRemote: String; Virtual;
     function GetPort: TIdPort; Virtual;
     function FillBufferWithLeftOver(Var ABuffer: TIdBytes): integer;
@@ -209,7 +227,7 @@ Type
       out AKey, ANewData: ansistring); virtual;
     // Blocking transaction On full Duplex Session will Wait until readThread Releases
     function Write(AData: RawByteString): integer; Virtual;
-    function ReadOneTransaction(var ABuffer: TIdBytes;
+    function ReadOneTransToBuffer(var ABuffer: TIdBytes;
       AClientWaitDiv5: integer): integer;
     function WaitForData(AWaitTime: integer): boolean;
     function GetBlockFromServerFileTransaction(const AFileName: ansistring;
@@ -274,12 +292,12 @@ Type
       write SetFileAccessBasePath;
     Property ReadDataWaitDiv5: integer read FReadDataWaitDiv5
       write FReadDataWaitDiv5;
-    // Time Waiting for a single ReadOneTransaction - FReadDataWaitDiv5
+    // Time (ms) Waiting for a single Read OneTransaction - FReadDataWaitDiv5
     // Will Cycle 5 times if no data recived  * 5
     // Cycle occures when Timeout raises Exception  and
     // ApplicationProcessMessages is run on each cycle if main thread used
-    // ReadOneTransaction is called * cReadDataWaitCycles
-    // from ReadATransactionRecord
+    // Read OneTransaction is called * cReadDataWaitCycles
+    // from Read ATransactionRecord
     //
     Property StopWatch: TStopWatch Read FChnlStopWatch;
     Property OnAnsiStringAction: TComandActionAnsi Read FOnAnsiStringAction
@@ -390,6 +408,9 @@ Type
   end;
 
   EExceptionIsComsNotExpected = class(Exception)
+  end;
+
+  EExceptionIsComsBadStart = class(Exception)
   end;
 
   TReadThread = class;
@@ -520,7 +541,7 @@ Type
       out ATrnctType: TTCPTransactionTypes;
       out AKey, ANewData: ansistring); Override;
       Base level Returns Full Duplex State }
-    Procedure SyncReturn(AMeathod: TThreadMethod); Override;
+    Procedure SyncReturn(AMethod: TThreadMethod); Override;
     function ProcessNonDuplexIncomingTransaction(Trans, Key: ansistring;
       TrnctType: TTCPTransactionTypes): boolean; // virtual;
     function ReadATransactionRecord(var ATrnctType: TTCPTransactionTypes;
@@ -599,7 +620,7 @@ Type
     Function DelayOfLessThan(ATestMilliSecs: integer;
       ARef: TDateTime = 0.0): boolean;
     Function DeltaMilliSecs(ARef: TDateTime = 0.0): Double;
-    // mSeconds since set time
+    // mSeconds since set time  Default use Now
 
     case ws: boolean of
       true:
@@ -784,7 +805,12 @@ Var
   GlobalApplicationProcessMessages: Procedure of Object;
   // Set in inititalize
   cDuplexInactiveTime: TTimeSpan; // = 5 / 24 / 60; // 5 minutes
-  c30SecondsDateTime: TTimeSpan; // = 0.5 / 24 / 60; // 40 Seconds
+{$IFDEF FPC}
+  c30SecondsDateTime: TDateTime;
+{$ELSE}
+  c30SecondsDateTime: TTimeSpan;
+{$ENDIF}
+  // = 0.5 / 24 / 60; // 30 Seconds
   cStart80TransactionAllowence: TTimeSpan; // 5 millisecs
 {$IFDEF Debug}
   // GlobalTCPLogAllData: boolean = true;
@@ -936,7 +962,7 @@ End;
 Function ArrayOfMeteredTimes(AData: ansistring): TArrayOfMeteredTimes;
 Var
   Sz: integer;
-  TimeData: TTimeRec;
+  // TimeData: TTimeRec;
   Idx, Nxt: integer;
 {$IFDEF NextGen}
   SrchS: ansistring;
@@ -1042,15 +1068,13 @@ begin
   // Result:=LongWord(@Dest[i]);
 end;
 
-{$IFDEF DEBUG}
-
 Function BufferAsAnsi(AWriteBuffer: TIdBytes): ansistring;
 {$IFDEF NEXTGEN}
 begin
- if AWriteBuffer=nil then
-  Result:=''
- else
-  Result.CopyBytesFromMemory(@AWriteBuffer[0], Length(AWriteBuffer));
+  if AWriteBuffer = nil then
+    Result := ''
+  else
+    Result.CopyBytesFromMemory(@AWriteBuffer[0], Length(AWriteBuffer));
 {$ELSE}
 Var
   i: integer;
@@ -1060,7 +1084,6 @@ begin
     Result[i] := AnsiChar(AWriteBuffer[i - 1]);
 {$ENDIF}
 end;
-{$ENDIF}
 
 { Mod Nov 2015 function StringFromBuffer(Const ABuffer: From (ABuffer }
 function StringFromBuffer(Const ABuffer: array of Byte; AStart, ACount: integer)
@@ -1084,6 +1107,36 @@ begin
     Result := '';
 end;
 
+Function BufferPos(ATst: Byte; AStart, BufferSz: integer;
+  ABuffer: array of Byte): integer; Overload;
+Var
+  i, Len: integer;
+begin
+  Result := -1;
+  Len := Length(ABuffer);
+  if Len <> BufferSz then
+    ISIndyUtilsException('BufferPos', 'Len<>BufferSz');
+  if BufferSz > 500000 then
+    ISIndyUtilsException('BufferPos', 'BufferSz>500000');
+  i := AStart;
+  if i < 0 then
+    i := 0;
+
+  while (i < BufferSz) and (Result < 0) do
+  Begin
+    if ABuffer[i] = ATst then
+      Result := i
+    else
+      Inc(i);
+  End;
+end;
+
+Function BufferPos(ATst: AnsiChar; AStart, BufferSz: integer;
+  ABuffer: array of Byte): integer; Overload;
+Begin
+  Result := BufferPos(Ord(ATst), AStart, BufferSz, ABuffer);
+End;
+
 function BytesToTextString(const ByteData: array of Byte): ansistring; overload;
 begin
   Result := BytesToTextString(StringFromBuffer(ByteData, 0, Length(ByteData)));
@@ -1093,30 +1146,33 @@ function BytesToTextString(const ByteData: ansistring): ansistring; overload;
 const
   a: set of ' ' .. '}' = [' ' .. '~'];
   Ctrl: set of #0 .. #255 = [#1 .. #31];
+{$IFDEF NextGen}
+begin
+  try
+    Result := ByteData.AsStringValues;
+{$ELSE}
 var
   i: integer;
   Sub: LongInt;
-  rr: ansistring;
+  rr, AllHex, AllDecVal: ansistring;
   x: AnsiChar;
-  GreaterThan127: boolean;
+  GreaterThan127, NeedAllHex: boolean;
   DataLength: integer;
-
-begin
+Begin
   try
-{$IFDEF NextGen}
-    Result := ByteData.AsStringValues;
-{$ELSE}
     Result := '';
     if ByteData = '' then
       Exit;
 
     i := 1;
     rr := '';
+    AllHex := '';
+    AllDecVal := '';
+    NeedAllHex := false;
     DataLength := Length(ByteData);
-    if DataLength > 1000 then
-      DataLength := 1000;
-    // raise EExceptionIsComsNotExpected.Create('BytesToTextString is limitted to 6000');
-    // modified for ISMultiUserPermObjFileStm
+    if DataLength > 100 then
+      DataLength := 100;
+
     while i <= DataLength do
     begin
       Sub := Ord(ByteData[i]);
@@ -1124,25 +1180,39 @@ begin
       if GreaterThan127 then
       begin
         Sub := Sub - 128;
-        rr := rr + '<';
+        NeedAllHex := true;
+        rr := rr + '^';
       end;
       x := AnsiChar(Sub);
       if (x in a) then
         rr := rr + x
-      else
-      begin
-        if GreaterThan127 then
-          rr := rr + '[' + IntToHex(Sub + 128, 2) + ']'
-        else
-          rr := rr + '[' + IntToHex(Sub, 2) + ']';
-        if (x in Ctrl) then
-          rr := rr + '(' + '^' + AnsiChar(Sub + 64) + ')';
-      end;
+        // ABC123<>!    Above 127 ^A^B^C^1^2^3^<^>^!
+        // (^A)(^B)(^C) Above 127 ^(^A)^(^B)^(^C)
+        // [8E][9F][
+      else if (x in Ctrl) then
+        rr := rr + '(' + '^' + AnsiChar(Sub + 64) + ')'
+        // (^A) Control A
+      Else if (Sub = 0) then
+        rr := rr + '(NUL)'
+      Else if (Sub = 127) then
+        rr := rr + '(DEL)'
+      Else
+      Begin
+        rr := rr + '(?)'; // No Translation
+        NeedAllHex := true;
+      End;
+
       if GreaterThan127 then
-        rr := rr + '>';
-      i := i + 1;
+        Sub := Sub + 128;
+      AllHex := AllHex + '[' + IntToHex(Sub, 2) + ']';
+      AllDecVal := AllDecVal + '{' + IntToStr(Sub) + '}';
+      Inc(i);
     end;
+
     Result := rr;
+
+    if NeedAllHex then
+      Result := Result + #13#10 + AllHex + #13#10 + AllDecVal;
 {$ENDIF}
   except
     on E: Exception do
@@ -1284,14 +1354,15 @@ function CompressedUnicode(const AUCode: UnicodeString): ansistring;
 // Contains Ascii version of Unicode but '' if 2 byte characters found
 // Reverse of DeCompressUnicode
 // Byte Contents Drops nulls in uncode
+{$IFDEF NextGen}
+begin
+  Result.CompressedUnicode(AUCode);
+{$ELSE}
 var
   Ri, Ui: integer;
   Nxt, Dest: PAnsiChar;
   R: StrCodeInfoRec;
 begin
-{$IFDEF NextGen}
-  Result.CompressedUnicode(AUCode);
-{$ELSE}
   R := StrCodeInfo(AUCode);
   if R.Length < 1 then
     Result := ''
@@ -1320,14 +1391,15 @@ end;
 function DeCompressUnicode(const AAnsiCode: RawByteString): UnicodeString;
 // Reverse of CompressedUnicode
 // Byte Contents inserted nulls
+{$IFDEF NextGen}
+begin
+  Result := AAnsiCode;
+{$ELSE}
 var
   Ri, Ai: integer;
   Nxt, Dest: PAnsiChar;
   R: StrCodeInfoRec;
 begin
-{$IFDEF NextGen}
-  Result := AAnsiCode;
-{$ELSE}
   R := StrCodeInfo(AAnsiCode);
   if R.Length < 1 then
     Result := ''
@@ -1357,9 +1429,11 @@ function UnicodeAsAnsi(const AUCode: UnicodeString): ansistring;
 // Byte Contents unchanged
 
 var
+  R: StrCodeInfoRec;
+{$IFNDEF NextGen}
   MemLen: integer;
   Nxt, Dest: pointer;
-  R: StrCodeInfoRec;
+{$Endif}
   // RstAnsiCode:RawByteString;
 begin
   // RstAnsiCode:= AAnsiCode;
@@ -1393,14 +1467,15 @@ function AnsiAsUnicode(const AAnsiCode: RawByteString): UnicodeString;
 // Reinstates String following UnicodeAsAnsi
 // Bypasses Conversion Routines
 // Byte Contents unchanged
-var
-  MemLen, ULen: integer;
-  Nxt, Dest: pointer;
-  R: StrCodeInfoRec;
-begin
 {$IFDEF NextGen}
+begin
   Result := AAnsiCode.RecoverFullUnicode;
 {$ELSE}
+var
+  MemLen, ULen: integer;
+  R: StrCodeInfoRec;
+  Nxt, Dest: pointer;
+begin
   R := StrCodeInfo(AAnsiCode);
   if R.Length < 1 then
     Result := ''
@@ -1605,220 +1680,6 @@ begin
   Result := PackTransaction(DSend, AEncryptKey);
 {$ENDIF}
 End;
-
-procedure DecodeIndyTCPBaseTransStart(Const ABuffer: array of Byte;
-  ACharsRead: integer; out ATransactionSize: Longword;
-  out AKey, ANewData: ansistring);
-// procedure DecodeIndyTCPBaseTransactionStart(Const ABuffer: array of Byte;
-// ACharsRead: integer; out ATransactionSize: Longword;
-// out ATrnctType: TTCPTransactionTypes; out AKey, ANewData: ansistring);
-var
-  i: integer;
-  ss: String;
-  // Transaction Format
-  // size
-  // Key
-  // S       Data>>>>>>>>>>>>>>>>>>>>>>>>>Transaction Sz>>>>>>>>>>>>>>>>>T
-  // <1234KEYADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATA>
-begin
-  if (ACharsRead < MinTransactionSz) or (ABuffer[0] <> Ord(CTransactionStart))
-  then
-  begin
-    ss := 'Invalid Transaction Sz=' + IntToStr(ACharsRead) + ' Start=' +
-      AnsiChar(ABuffer[0]) + '  Type::' + AnsiChar(ABuffer[5]) +
-      AnsiChar(ABuffer[6]) + AnsiChar(ABuffer[7]);
-    raise EExceptionIsComsNotExpected.Create(ss);
-  end;
-  try
-    ATransactionSize := ABuffer[1] + ABuffer[2] * 256 + ABuffer[3] * 256 * 256 +
-      ABuffer[4] * 256 * 256 * 256;
-
-    if ATransactionSize > CMaxDuplexPacket then
-    Begin
-      Raise Exception.Create('CMaxDuplexPacket Exceeded::' +
-        IntToStr(ATransactionSize) + '>' + IntToStr(CMaxDuplexPacket));
-    End;
-
-    i := ACharsRead - 8;
-
-    // Short transactions (Got) have no data
-    // So Transaction size is 0
-    // Old code returns a > because AChars read=9 but new code Chars read = 8
-    if i > ATransactionSize + 1 then
-      i := ATransactionSize + 1;
-    AKey := AnsiChar(ABuffer[5]) + AnsiChar(ABuffer[6]) + AnsiChar(ABuffer[7]);
-    // ATrnctType := DecodeTransactionType(AKey);
-{$IFDEF NEXTGEN}
-    ANewData.CopyBytesFromMemory(@ABuffer[8], i);
-{$ELSE}
-    SetLength(ANewData, i);
-    if i > 0 then
-      CopyMemory(@ANewData[1], @ABuffer[8], i);
-{$ENDIF}
-  except
-    on E: Exception do
-      raise EExceptionIsComsNotExpected.Create
-        ('DecodeIndyTCPBaseTransactionStart::' + E.Message);
-  end;
-end;
-
-(* function BuildFullTransaction(const ACurrentData, ANewData: ansistring;
-  var ANextChunkNo: Word; out ATrnctType: TTCPTransactionTypes;
-  out AKey: ansistring): ansistring;
-  var
-  DataToAdd, ChnkNo: TTxnSzRecord;
-  DatLen: Longword;
-  LastChunk: boolean;
-
-  begin
-  AKey := '';
-  DatLen := Length(ANewData);
-  if DatLen < 8 then
-  raise EExceptionIsComsNotExpected.Create
-  ('BuildFullTransaction:Too Little Data::' + ANewData);
-  {$IFDEF FPC}
-  ChnkNo := SzRecFrmString(ANewData);
-  DataToAdd := SzRecFrmString(ANewData, 4);
-  {$ELSE}
-  ChnkNo.FrmString(ANewData);
-  DataToAdd.FrmString(ANewData, 4);
-  {$ENDIF}
-  if DatLen <> 8 + DataToAdd.Sz then
-  raise EExceptionIsComsNotExpected.Create('BuildFullTransaction:Bad DataSz');
-
-  if (ChnkNo.Sz < 1) and (ACurrentData <> '') then
-  raise EExceptionIsComsNotExpected.Create
-  ('BuildFullTransaction:First chunk not first');
-
-  LastChunk := ChnkNo.Sz > $FFFFFFF;
-
-  if LastChunk then
-  begin
-  ChnkNo.Sz := ChnkNo.Sz - +$F0000000;
-  if ANewData[DatLen] = '>' then
-  Dec(DataToAdd.Sz)
-  else
-  raise EExceptionIsComsNotExpected.Create
-  ('BuildFullTransaction:Last chunk not Terminated');
-  end;
-
-  if ChnkNo.Sz = ANextChunkNo then
-  Inc(ANextChunkNo)
-  else
-  raise EExceptionIsComsNotExpected.Create
-  ('BuildFullTransaction:Chunk out of order');
-
-  Result := ACurrentData + Copy(ANewData, 9, DataToAdd.Sz);
-
-  if LastChunk then
-  try
-  // DecodeIndyTCPBaseTransactionStart(buffer, DataCount, TransactionSize, ATrnctType, AKey, NewData);
-  DatLen := Length(Result);
-  if Byte(Result[1]) <> Byte(CTransactionStart) then
-  raise EExceptionIsComsNotExpected.Create
-  ('BuildFullTransaction:No Start Char');
-  {$IFDEF FPC}
-  DataToAdd := SzRecFrmString(Result, 1);
-  {$ELSE}
-  DataToAdd.FrmString(Result, 1);
-  {$ENDIF}
-  DatLen := DatLen - 8;
-  if DatLen > DataToAdd.Sz + 1 then
-  DatLen := DataToAdd.Sz + 1;
-  {$IFDEF NEXTGEN}
-  AKey := Result[5] + Result[6] + Result[7];
-  {$ELSE}
-  AKey := Result[6] + Result[7] + Result[8];
-  {$ENDIF}
-  ATrnctType := DecodeTransactionTCPType(AKey);
-
-  if DatLen > 0 then
-  {$IFDEF NEXTGEN}
-  Result := Copy(Result, 8, DatLen);
-  {$ELSE}
-  Result := Copy(Result, 9, DatLen);
-  {$ENDIF}
-  except
-  on E: Exception do
-  raise EExceptionIsComsNotExpected.Create
-  ('BuildFullTransaction::DecodeIndyTCPBaseTransactionStart::' +
-  E.Message);
-  end
-  else
-  ATrnctType := PartTrnData;
-  end;
-
-  function GenerateTransactionChunkData(var AData: ansistring;
-  var AChunkCount: Word): ansistring;
-  var
-  DataFlgToGo, ChnkNo, Txn: TTxnSzRecord;
-  DatLen, DataToGo: Longword;
-  TxnKey: ansistring;
-  begin
-  DatLen := Length(AData);
-  if AChunkCount = 0 then
-  begin
-  if DatLen < cMaxDataChunk then
-  raise EExceptionIsComsNotExpected.Create('Chunk<MaxDataChunk on 0');
-  try
-  {$IFDEF NEXTGEN}
-  TxnKey := AData[0] + AData[1] + AData[2];
-  {$ELSE}
-  TxnKey := AData[1] + AData[2] + AData[3];
-  {$ENDIF}
-  DecodeTransactionTCPType(TxnKey);
-  Txn.Sz := Length(AData) - 3;
-  except
-  raise EExceptionIsComsNotExpected.Create
-  ('GenerateTransactionChunkData:No Valid Transaction::' + TxnKey);
-  end;
-  end;
-
-  ChnkNo.Sz := AChunkCount;
-  if DatLen > cMaxDataChunk then
-  DataFlgToGo.Sz := cMaxDataChunk
-  else
-  begin
-  DataFlgToGo.Sz := DatLen;
-  ChnkNo.Sz := AChunkCount + $F0000000;
-  end;
-
-  DataToGo := DataFlgToGo.Sz;
-  if AChunkCount = 0 then
-  begin
-  Inc(DataFlgToGo.Sz, 5);
-  {$IFDEF FPC}
-  Result := cPartTransactionData + SzRecAsString(ChnkNo) +
-  SzRecAsString(DataFlgToGo) + CTransactionStart + SzRecAsString(Txn);
-  {$ELSE}
-  Result := cPartTransactionData + ChnkNo.AsString + DataFlgToGo.AsString +
-  CTransactionStart + Txn.AsString;
-  {$ENDIF}
-  end
-  else
-  begin
-  if ChnkNo.Sz > $FFFFFFF then
-  Inc(DataFlgToGo.Sz);
-  {$IFDEF FPC}
-  Result := cPartTransactionData + SzRecAsString(ChnkNo) +
-  SzRecAsString(DataFlgToGo);
-  {$ELSE}
-  Result := cPartTransactionData + ChnkNo.AsString + DataFlgToGo.AsString;
-  {$ENDIF}
-  end;
-  Result := Result + Copy(AData, 1, DataToGo);
-
-  if ChnkNo.Sz > $FFFFFFF then
-  begin
-  AData := '';
-  Result := Result + CTransactionEnd;
-  end
-  else
-  AData := Copy(AData, DataToGo + 1, DatLen);
-
-  Inc(AChunkCount);
-  end;
-*)
 
 { TISIndyTCPClient }
 
@@ -2195,7 +2056,6 @@ Var
   SendData, KeyTxt, Response: ansistring;
   Rtn: TTCPTransactionTypes;
   OffSet: integer;
-  Tst: string;
 
 begin
   Result := false;
@@ -2210,7 +2070,7 @@ begin
   SendTransaction(SendData, Rtn, KeyTxt, Response);
   OffSet := Length(cIsLinkedOnServer);
   if (Length(Response) > OffSet) then
-    Result := Pos(AnsiString('CK#'), Response) = OffSet;
+    Result := Pos(ansistring('CK#'), Response) = OffSet;
 end;
 
 function TISIndyTCPClient.LogTextOnServer(AData: ansistring): ansistring;
@@ -2828,6 +2688,7 @@ constructor TISIndyTCPClient.StartAccess(const AServerName: String;
 var
   ErrorStr: ansistring;
 begin
+  ErrorStr:='';
   Try
     fCreatedViaStartAccess := true;
     Create;
@@ -2857,20 +2718,20 @@ begin
     else
     Begin
       ErrorStr := 'Failed to connect to ' + AServerName + ':' + IntToStr(APort);
-      LogAMessage(ErrorStr);
+      ISIndyUtilsException(Self, '#' + 'Set Access ' + ErrorStr);
     End;
     // if Assigned(AOnLogMessage) then
     // OnLogMsg := AOnLogMessage;
 
     if GblLogAllChlOpenClose then
-      ISIndyUtilsException(Self, '#' + 'Set Access ' + TextID);
+      ISIndyUtilsException(Self, '#' + 'Set Access ' + TextID + ErrorStr);
   Except
     on E: Exception do
     Begin
-      ISIndyUtilsException(Self, E, 'TISIndyTCPClient.StartAccess :: '
-        + TextID);
       ErrorStr := 'Exception on connect to ' + AServerName + ':' +
-        IntToStr(APort) + '>>' + E.Message;
+        IntToStr(APort);
+      ISIndyUtilsException(Self, E, 'TISIndyTCPClient.StartAccess :: '
+        + TextID+#13#10+ErrorStr);
     End;
   End;
 end;
@@ -3183,6 +3044,7 @@ End;
 constructor TISIndyTCPBase.Create;
 begin
   Try
+    FTotalSessionRead := 0;
     FChnlStopWatch := TStopWatch.StartNew;
     if FChnlStopWatch.IsHighResolution then
       // FChnlStopWatch.Start
@@ -3206,6 +3068,96 @@ begin
       ISIndyUtilsException(Self, E, 'TISIndyTCPBase Create');
   End;
   Inherited;
+end;
+
+procedure TISIndyTCPBase.DecodeIndyTCPBaseTransStart(const ABuffer
+  : array of Byte; ACharsRead: integer; out ATransactionSize: Longword;
+  out AKey, ANewData: ansistring);
+var
+  i: integer;
+  ss: String;
+  // Transaction Format
+  // size
+  // Key
+  // S       Data>>>>>>>>>>>>>>>>>>>>>>>>>Transaction Sz>>>>>>>>>>>>>>>>>T
+  // <1234KEYADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATA>
+  // ^                        Transaction Size                   ^
+  Function FormatInvalid(ASz: integer; ABadStart: boolean): ansistring;
+  Var
+    TxtBuffer: TIdBytes;
+    i: integer;
+
+  Begin
+    i := Length(ABuffer);
+    if i > 8 then
+      i := 8;
+    SetLength(TxtBuffer, i);
+    for i := 0 to Length(TxtBuffer) - 1 do
+      TxtBuffer[i] := ABuffer[i];
+
+    if ASz < MinTransactionSz then
+      Result := IntToStr(ASz) + '<Min Sz  '
+    else if ASz > CMaxDuplexPacket then
+      Result := IntToStr(ASz) + '>Max Sz  '
+    Else
+      Result := 'Size =' + IntToStr(ASz) + '   ';
+
+    Result := 'Total Pos = '+IntToStr(FTotalSessionRead)+'  '+Result;
+    if ABadStart then
+      Result := Result + 'Bad Start ::'#13#10 +
+        BytesToTextString(BufferAsAnsi((TxtBuffer))) + #13#10
+    Else
+      Result := Result + '   Header ::'#13#10 +
+        BytesToTextString(BufferAsAnsi((TxtBuffer))) + #13#10;
+  End;
+
+begin
+  if (ACharsRead < MinTransactionSz) or (ABuffer[0] <> Ord(CTransactionStart))
+  then
+  begin
+    ss := 'DecodeIndyTCPBaseTransactionStart ' + FormatInvalid(ACharsRead,
+      (ABuffer[0] <> Ord(CTransactionStart)));
+    ISIndyUtilsException(Self, ss);
+
+    raise EExceptionIsComsBadStart.Create(ss);
+    // recover transaction from call location
+  end;
+
+  ATransactionSize := ABuffer[1] + ABuffer[2] * 256 + ABuffer[3] * 256 * 256 +
+    ABuffer[4] * 256 * 256 * 256;
+
+  if ATransactionSize > CMaxDuplexPacket then
+  Begin
+    ss := 'Decode#IndyTCPBaseTransStart ' +
+      FormatInvalid(ATransactionSize, false);
+    ISIndyUtilsException('Decode#IndyTCPBaseTransStart', ss);
+    Raise EExceptionIsComsBadStart.Create('CMaxDuplexPacket Exceeded::' + ss)
+  End;
+
+  try
+    i := ACharsRead - 8;
+    if i < 0 then
+      i := 0;
+    // Short transactions (Got) have no data
+    // So Transaction size is 0
+    // Old code returns a > because AChars read=9
+    // but new code Chars read = 8
+    if i > ATransactionSize + 1 then
+      i := ATransactionSize + 1;
+    AKey := AnsiChar(ABuffer[5]) + AnsiChar(ABuffer[6]) + AnsiChar(ABuffer[7]);
+
+{$IFDEF NEXTGEN}
+    ANewData.CopyBytesFromMemory(@ABuffer[8], i);
+{$ELSE}
+    SetLength(ANewData, i);
+    if i > 0 then
+      CopyMemory(@ANewData[1], @ABuffer[8], i);
+{$ENDIF}
+  except
+    on E: Exception do
+      raise EExceptionIsComsBadStart.Create
+        ('DecodeIndyTCPBaseTransactionStart::' + E.Message);
+  end;
 end;
 
 function TISIndyTCPBase.DecodeSafeFileTransferPath(ACmdPlusPath: string)
@@ -3260,10 +3212,11 @@ end;
 destructor TISIndyTCPBase.Destroy;
 Var
   LOnDestroy: TISIndyTCPEvent;
+  Msg:String;
 begin
   if GblLogAllChlOpenClose then
     ISIndyUtilsException(Self, '#' + 'Enter TISIndyTCPBase Destroy >>' + TextID
-      + 'Object Duration ' + FChnlStopWatch.Elapsed.ToString);
+      +#13#10'Object Duration ' + FChnlStopWatch.Elapsed.ToString);
   try
     TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
       FChnlStopWatch.Elapsed);
@@ -3324,15 +3277,19 @@ begin
   end;
   // NOTHING OWNED HERE???
   if GblLogAllChlOpenClose then
-    ISIndyUtilsException(Self, '#' + 'Exit TISIndyTCPBase Destroy >>' + TextID);
+  Begin
+    Msg:= '#' + 'Exit TISIndyTCPBase Destroy >>' + TextID+
+    #13#10'Object Duration ' + FChnlStopWatch.Elapsed.ToString;
+  End;
+    ISIndyUtilsException(Self,Msg);
 end;
 
 function TISIndyTCPBase.DoFullDuplexIncomingAction(AData: ansistring): boolean;
 Var
-  Rtn, ErrorMsg: ansistring;
+  ErrorMsg: ansistring;
 
 begin
-  Result := false;
+//  Result := false;
   ErrorMsg := '';
 
   if AData <> '' then
@@ -3431,7 +3388,8 @@ begin
   buffer := nil;
   Try
     SetLength(ABuffer, (LenSv + DataCount));
-
+    FTotalSessionRead:=FTotalSessionRead - LenSv;
+    //Will be added again
     for i := 1 to LenSv do
       ABuffer[i - 1] := Ord(FNextTransactionData[i]);
 
@@ -3457,8 +3415,9 @@ function TISIndyTCPBase.FullDuplexDispatch(AData: ansistring; AKey: ansistring
 var
   ToSend, Sent: LongInt;
   DataToGo: ansistring;
+{$IFDEF NEXTGEN}
   DebugString: String;
-
+{$Endif}
 {$IFNDEF  SuppressIPMetering}
   MeteringFlag: boolean;
 begin
@@ -3595,6 +3554,58 @@ begin
   Result := Pos(Tst, Lowercase(AFileName)) = 1;
 end;
 
+function TISIndyTCPBase.IsValid(AStartOffset, ABufNxt: integer;
+  var ABuffer: TIdBytes; ACharsRead: integer; out ATransactionSize: Longword;
+  out AKey, ANewData: ansistring): boolean;
+Var
+  LKey, NewBufferStr: ansistring;
+  LTransactionSize: Longword;
+begin
+  Result := false;
+  ANewData:='';
+  AKey:='';
+  if AStartOffset + 8 > Length(ABuffer) then
+    Exit;
+  // <1234KEYADATAADATA
+  LKey := AnsiChar(ABuffer[AStartOffset + 5]) +
+    AnsiChar(ABuffer[AStartOffset + 6]) + AnsiChar(ABuffer[AStartOffset + 7]);
+
+  Try
+    DecodeTransactionTCPType(LKey);
+  Except
+    Exit
+  End;
+
+  LTransactionSize := ABuffer[AStartOffset + 1] + ABuffer[AStartOffset + 2] *
+    256 + ABuffer[AStartOffset + 3] * 256 * 256 + ABuffer[AStartOffset + 4] *
+    256 * 256 * 256;
+
+  Result := (LTransactionSize > MinTransactionSz) and
+    (LTransactionSize < CMaxDuplexPacket);
+
+  if Result then
+    if (AStartOffset + LTransactionSize) > Length(ABuffer) then
+    Begin
+      FNextTransactionData := StringFromBuffer(ABuffer, AStartOffset,
+        Length(ABuffer));
+      if FNextTransactionData[1 + ZSISOffset] = '<' then
+        SetLength(ABuffer, 0)  //Contained in FNext..
+      Else
+        raise EExceptionIsComsNotExpected.Create('IsValid Leftover 1 not "<"');
+    End
+    Else
+    Begin
+      NewBufferStr := StringFromBuffer(ABuffer, AStartOffset, Length(ABuffer));
+      ANewData := StringFromBuffer(ABuffer, AStartOffset + MinTransactionSz,
+        LTransactionSize);
+      FNextTransactionData := StringFromBuffer(ABuffer,
+        AStartOffset + LTransactionSize, Length(ABuffer));
+      ABuffer := TIdBytes(BufferFromString(NewBufferStr, 1 + ZSISOffset,
+        Length(NewBufferStr)));
+      AKey := LKey;
+    End;
+end;
+
 function TISIndyTCPBase.LocalAddress: ansistring;
 begin
   Result := '';
@@ -3633,8 +3644,7 @@ begin
   // Log only once every Four Minutes
   Begin
     FLastLoggedTimeStampError := FChnlStopWatch.Elapsed;
-    ISIndyUtilsException(Self, '#LogTimeStampFail >>' + AMessage + '  At' +
-      FormatDateTime(' dd/mm/yy hh:nn:ss', Now));
+    ISIndyUtilsException(Self, '#LogTimeStampFail >>' + AMessage);
     if TmStmp.FromTransString(AData) then
       ISIndyUtilsException(Self, '#LogTimeStampFail >>' + 'Time Data Stamp =' +
         TmStmp.AsString)
@@ -3698,162 +3708,250 @@ end;
 function TISIndyTCPBase.ReadATransactionRecord(var ATrnctType
   : TTCPTransactionTypes; var AKey: ansistring): ansistring;
 var
-  LengthNewData, NewTransactionStart, WaitForNextResponse, DataCount: integer;
+  LengthBuffer, LengthNewData, NewTransactionStart, WaitForNextResponse,
+    DataCount: integer;
   buffer: TIdBytes;
   TransactionSize: Longword;
   NewData: ansistring;
   ShouldClose: boolean;
-
+  ss: ansistring;
 begin
-  Result := '';
-  NewData := '';
-  ATrnctType := FlgError;
-  { test
-    Status := 0;
-    OldTransactionData := FNextTransactionData;
-    UniqueString(OldTransactionData);
-    if OldTransactionData <> '' then
-    Status := 4; { /test }
-  TransactionSize := 8;
-  if fFullDuplex then
-    WaitForNextResponse := 1
-  else
-    WaitForNextResponse := cReadDataWaitCycles;
-  // x FReadDataWait
-  while (FConnection <> nil) and (FConnection.Connected) and (AKey = '') and
-    (WaitForNextResponse > 0) do
-    try
-      if FNextTransactionData <> '' then
-        DataCount := FillBufferWithLeftOver(buffer)
-      else
-      Begin
+  DataCount:=0;
+  try
+    FThreadID:=  TThread.CurrentThread.ThreadID;
+    FReadInMainThread:=FThreadID = MainThreadID;
+    Result := '';
+    NewData := '';
+    ATrnctType := FlgError;
+    { test
+      Status := 0;
+      OldTransactionData := FNextTransactionData;
+      UniqueString(OldTransactionData);
+      if OldTransactionData <> '' then
+      Status := 4; { /test }
+    TransactionSize := 8;
+    if fFullDuplex then
+      WaitForNextResponse := 1
+    else
+      WaitForNextResponse := cReadDataWaitCycles;
+    // x FReadDataWait
+    while (FConnection <> nil) and (FConnection.Connected) and (AKey = '') and
+      (WaitForNextResponse > 0) do
+      try
         buffer := nil;
         if FConnection = nil then
           raise EExceptionIsComsNotExpected.Create
             ('FConnection.Read FConnection=nil');
-        DataCount := ReadOneTransaction(buffer, FReadDataWaitDiv5);
-        // FTCPClient knows how much data to expect and will return once read
-        // o delay can increase to 25 seconds
-        { Test
-          if DataCount > 0 then
-          SaveBuffers(buffer, DataCount)
-          Else
-          { test
-          Status := -1; { }
-      end;
-      if DataCount = 0 then
-        Dec(WaitForNextResponse)
-      else
-        try
-          if AnsiChar(buffer[0]) <> '<' then
-            raise EExceptionIsComsNotExpected.Create
-              (' ReadATransactionRecord:: buffer[0]<> < ::Status=');
-          // +  inttoStr(Status) + '::' + OldTransactionData);
-          // DecodeIndyTCPBaseTransactionStart(buffer, DataCount, TransactionSize, ATrnctType,
-          // AKey, NewData);
-          DecodeIndyTCPBaseTransStart(buffer, DataCount, TransactionSize,
-            AKey, NewData);
-          if (AKey = '') then
-            AKey := cReturnError;
-          ATrnctType := DecodeTransactionTCPType(AKey);
-          if CheckReadBusy then
-            Sleep(1000);
-        except
-          on E: Exception do
-          begin
-            NewData := StringFromBuffer(buffer, 0, DataCount);
-            AKey := 'Err';
-            raise EExceptionIsComsNotExpected.Create
-              (E.Message + ' ReadATransactionRecord:: NewData=' + NewData);
-          end;
-        end;
-    except
-      on E: Exception do
         Try
-          ShouldClose := true;
-          if E is EIdReadTimeout then
+          DataCount := ReadOneTransToBuffer(buffer, FReadDataWaitDiv5);
+          // FTCPClient knows how much data to expect and will return once read
+          // o delay can increase to 25 seconds
+        Except
+          On ET: EIdReadTimeout do
           Begin
-            Dec(WaitForNextResponse);
-            ShouldClose := FCloseOnTimeOut and (WaitForNextResponse < 1);
-            If ShouldClose then
-              if GblRptTimeoutClear then
-              Begin
-                LogAMessage('Closing On Timeout:: ' + E.Message);
-                ISIndyUtilsException(Self, E, 'Closing On Timeout::' +
-                  E.Message);
-              end;
-          End;
-          if ShouldClose then
-          Begin
-            WaitForNextResponse := 0;
-            if GblLogAllChlOpenClose then
-            begin
-              ISIndyUtilsException(Self, E, '#ReadATransactionRecord');
-              LogAMessage('Closing:: ' + E.Message);
-            end;
-            CloseGracefully;
-            if FConnection <> nil then
+            if DataCount > 0 then
             Begin
-              FConnection.Disconnect;
+              FNextTransactionData := StringFromBuffer(buffer, 0, DataCount);
+              DataCount := 0;
+            End;
+          End;
+          On EE: Exception do
+            ISIndyUtilsException(Self, EE,
+              'EE:Exception in ReadA#TransactionRecord')
+        End;
+        if DataCount = 0 then
+          Dec(WaitForNextResponse)
+        else
+          try
+            if AnsiChar(buffer[0]) <> '<' then
+            Begin
+              ss := BytesToTextString(BufferAsAnsi(buffer));
+{$IFDEF NEXTGEN}
+              if ss.Length > 30 then
+                ss.Length:=30;
+{$ELSE}
+              if Length(ss) > 30 then
+                SetLength(ss, 30);
+{$ENDIF}
+              raise EExceptionIsComsNotExpected.Create
+                (' Read A TransactionRecord:: buffer[0]<> "<" ::Buffer=' + ss);
+            End;
+
+            try
+              DecodeIndyTCPBaseTransStart(buffer, DataCount, TransactionSize,
+                AKey, NewData);
+            Except
+              On E: Exception do
+              begin
+                ISIndyUtilsException(Self, E,
+                  'Read#ATransactionRecord Decode Indy TCPBaseTransStart '
+                  + TextID);
+                raise
+              end;
+            end;
+            if (AKey = '') then
+              AKey := cReturnError;
+            ATrnctType := DecodeTransactionTCPType(AKey);
+          except
+            on E: Exception do
+            begin
+              NewData := StringFromBuffer(buffer, 0, DataCount);
+              AKey := 'Err';
+              raise EExceptionIsComsNotExpected.Create
+                (E.Message + ' ReadATransactionRecord:: NewData=' + NewData);
+            end;
+          end;
+      except
+        on E: Exception do
+          Try
+            ShouldClose := true;
+            if E is EIdReadTimeout then
+            Begin
+              Dec(WaitForNextResponse);
+              ShouldClose := FCloseOnTimeOut and (WaitForNextResponse < 1);
+              If ShouldClose then
+                if GblRptTimeoutClear then
+                Begin
+                  LogAMessage('Closing On Timeout:: ' + E.Message);
+                  ISIndyUtilsException(Self, E, 'Closing On Timeout::' +
+                    E.Message);
+                end;
+            End;
+
+            if ShouldClose then
+            Begin
+              WaitForNextResponse := 0;
+              if GblLogAllChlOpenClose then
+              begin
+                ISIndyUtilsException(Self, E,
+                  '#ReadATransactionRecord Closing');
+                LogAMessage('Closing:: ' + E.Message);
+              end;
+              CloseGracefully;
+              if FConnection <> nil then
+              Begin
+                FConnection.Disconnect;
+                FConnection := nil;
+              End;
+              // AKey := 'Err';
+              // ANewData := 'Transaction Fail::' + e.Message;
+            end;
+          Except
+            On EEE: Exception Do
+            Begin
+              ISIndyUtilsException(Self, EEE,
+                '#ReadATransactionRecord Error In Exception Aborting Channel '
+                + TextID);
+              WaitForNextResponse := 0;
               FConnection := nil;
             End;
-            // AKey := 'Err';
-            // ANewData := 'Transaction Fail::' + e.Message;
           end;
-        Except
-          WaitForNextResponse := 0;
-          FConnection := nil;
+      end; // While No Transaction
+//    NewTransactionStart:=MaxInt;
+    WaitForNextResponse := 3; // x 5000 ms
+{$IFDEF NEXTGEN}
+    LengthNewData := NewData.Length;
+{$ELSE}
+    LengthNewData := Length(NewData);
+{$ENDIF}
+    if (WaitForNextResponse = 0) or (LengthNewData < TransactionSize + 1) or
+      (NewData[TransactionSize + 1 + ZSISOffset] <> CTransactionEnd) then
+    begin
+      if LengthNewData>1 then
+         Begin
+      ss := 'Repeating Read#ATransactionRecord WaitForNextResponse =' +
+        IntToStr(WaitForNextResponse) + ' New Data Length =' +
+        IntToStr(LengthNewData) + 'Transaction Sz=' + IntToStr(TransactionSize);
+      if (LengthNewData >= TransactionSize + 1) then
+        ss := ss + ' End Char=' + NewData[TransactionSize + 1 + ZSISOffset];
+      ISIndyUtilsException(Self, ss);
+         End;
+      AKey := '';
+      NewData := '';
+    end
+    else
+    begin
+      FLastTransactionKey := AKey;
+      NewTransactionStart := TransactionSize + 1 + MinTransactionSz;
+      LengthBuffer := Length(buffer);
+      FTotalSessionRead := FTotalSessionRead + LengthBuffer;
+
+      // Keep Last Data
+      if LengthNewData < 10 then
+        FLastTransactionEnd := NewData
+      else
+        FLastTransactionEnd := Copy(NewData, LengthNewData - 5, 10);
+      // Keep Last Data
+
+      If (NewTransactionStart < LengthBuffer) Then
+      Begin
+        FNextTransactionData := BufferAsAnsi(Copy(buffer, NewTransactionStart,
+          LengthBuffer));
+        // Keep Last Data
+        FLastTransactionEnd := FLastTransactionEnd + Copy(FNextTransactionData,
+          1 + ZSISOffset, 20);
+        // Keep Last Data
+
+        if FNextTransactionData[1 + ZSISOffset] <> CTransactionStart then
+        Begin
           ISIndyUtilsException(Self,
-            '#ReadATransactionRecord Error In Exception::' + E.Message);
-        end;
-    end; // While No Transaction
-
-  WaitForNextResponse := 3; // x 5000 ms
-{$IFDEF NEXTGEN}
-  LengthNewData := NewData.Length;
-  NewTransactionStart := TransactionSize + 1;
-  if (WaitForNextResponse = 0) or (LengthNewData < TransactionSize + 1) or
-    (NewData[TransactionSize] <> CTransactionEnd) then
-{$ELSE}
-  LengthNewData := Length(NewData);
-  NewTransactionStart := TransactionSize + 2;
-
-  if (WaitForNextResponse = 0) or (LengthNewData < TransactionSize + 1) or
-    (NewData[TransactionSize + 1] <> CTransactionEnd) then
-{$ENDIF}
-  begin
-    AKey := '';
-    NewData := '';
-  end
-  else
-  begin
-    If (LengthNewData > TransactionSize + 1) then
-      If (NewData[NewTransactionStart] = CTransactionStart) then
-        FNextTransactionData := Copy(NewData, NewTransactionStart,
-          Length(buffer))
+            'Read#ATransactionRecord Bad CarryOver "><" '#13#10 +
+            BytesToTextString(FNextTransactionData));
+        End
+        Else if GlobalTCPLogAllData then
+          ISIndyUtilsException(Self, TextID + '#Carry Over'#13#10 +
+            BytesToTextString(FNextTransactionData));
+      End
       Else
-        FNextTransactionData := Copy(NewData, NewTransactionStart,
-          Length(buffer));
+        FNextTransactionData := '';
+
 {$IFDEF NEXTGEN}
-    NewData.Length := TransactionSize;
-    { encrypt }
-    if (FRandomKey <> '') and (ATrnctType <> FlgError) and (NewData <> '') then
-      Encrypt(TransactionSize, pointer(NewData), FRandomKey.Length,
-        pointer(FRandomKey));
-    { encrypt }
+      NewData.Length := TransactionSize;
+      { encrypt }
+      if (FRandomKey <> '') and (ATrnctType <> FlgError) and (NewData <> '')
+      then
+        Encrypt(TransactionSize, pointer(NewData), FRandomKey.Length,
+          pointer(FRandomKey));
+      { encrypt }
 {$ELSE}
-    SetLength(NewData, TransactionSize);
-    { encrypt }
-    if (FRandomKey <> '') and (ATrnctType <> FlgError) and (NewData <> '') then
-      Encrypt(TransactionSize, @NewData[1], Length(FRandomKey), @FRandomKey[1]);
-    { encrypt }
+      SetLength(NewData, TransactionSize);
+      { encrypt }
+      if (FRandomKey <> '') and (ATrnctType <> FlgError) and (NewData <> '')
+      then
+        Encrypt(TransactionSize, @NewData[1], Length(FRandomKey),
+          @FRandomKey[1]);
+      { encrypt }
 {$ENDIF}
-  end;
+    end;
+
 {$IFNDEF  SuppressIPMetering}
-  if Pos(cIPTimedMetering, NewData) > 2 then
-    NewData := NewData + AddMeteredTimeRecAsString('RD');
+    if TransactionSize > 2 then
+      if Pos(cIPTimedMetering, NewData) > 2 then
+        NewData := NewData + AddMeteredTimeRecAsString('RD');
 {$ENDIF}
-  Result := NewData;
+    // Keep Last Data
+    FLastTransactionKey := AKey;
+    FLastTransactionSz := IntToStr(TransactionSize);
+    // Keep Last Data
+    Result := NewData;
+    if GlobalTCPLogAllData then
+    begin
+      if LengthNewData > 50 then
+{$IFDEF NEXTGEN}
+        NewData.Length := 50;
+{$ELSE}
+        SetLength(NewData, 50);
+{$ENDIF}
+      ISIndyUtilsException(Self, TextID + ' Decrypt'#13#10 + NewData);
+    end;
+  Except
+    On E: Exception do
+    Begin
+      ISIndyUtilsException(Self, E, 'Read#ATransactionRecord Outer Loop');
+      raise EExceptionIsComsNotExpected.Create('Read#ATransactionRecord :: ' +
+        E.Message);
+    End;
+  end;
 end;
 
 function TISIndyTCPBase.ReadFullDuplexLogMessage: String;
@@ -3895,7 +3993,7 @@ begin
   End;
 end;
 
-function TISIndyTCPBase.ReadOneTransaction(var ABuffer: TIdBytes;
+function TISIndyTCPBase.ReadOneTransToBuffer(var ABuffer: TIdBytes;
   AClientWaitDiv5: integer): integer;
 // Wait till data comes in
 // Read Transaction Start to get Transaction size
@@ -3906,10 +4004,8 @@ function TISIndyTCPBase.ReadOneTransaction(var ABuffer: TIdBytes;
 Var
   FullTransactionDataSz: Longword;
   Key, Data, ErrorPos: ansistring;
-  WaitCount: integer;
-  // {$IFDEF DEBUG}
+  LoopCount, WaitCount, FromLeftOver, InitialRead, StillToRead: integer;
   ss: string;
-  // {$ENDIF}
 {$IFNDEF  SuppressIPMetering}
   ReadTicks: TTimeSpan;
 begin
@@ -3922,32 +4018,122 @@ begin
   while (FConnection <> nil) and (Result = 0) and (WaitCount > 0) do
     Try
       ErrorPos := 'Start';
-{$IFDEF DEBUG}
-      ss := BufferAsAnsi(ABuffer);
-{$ENDIF}
       // SetLength(ABuffer,0); done by Apend=false in readbytes
       FConnection.Socket.ReadTimeOut := AClientWaitDiv5;
-      ErrorPos := 'Ready readBytes';
-      FConnection.Socket.ReadBytes(ABuffer, MinTransactionSz + 1, false);
+      ErrorPos := 'Ready readBytes MinTransactionSz';
+      if FNextTransactionData <> '' then
+      Begin
+        FromLeftOver := FillBufferWithLeftOver(ABuffer);
+        if FromLeftOver < MinTransactionSz + 1 then
+         Begin
+           ISIndyUtilsException(Self, 'Small leftover FNextTransactionData is'#13#10 +
+            BytesToTextString(FNextTransactionData));
+           FConnection.Socket.ReadBytes(ABuffer,
+            (MinTransactionSz + 1 - FromLeftOver), true);
+           ISIndyUtilsException(Self, 'Buffer is'#13#10 +
+            BytesToTextString(BufferAsAnsi(ABuffer)));
+         End;
+      End
+      Else
+        FConnection.Socket.ReadBytes(ABuffer, MinTransactionSz + 1, false);
       // +1 to get >
+
       // Exception on Timeout - Try again (5 Times)
-      Result := Length(ABuffer);
-      ErrorPos := 'Buffer Len=' + IntToStr(Result);
-      if Result < MinTransactionSz + 1 then
-        raise EIdReadTimeout.Create('Read Less Than MinTransactionSz::' +
+      InitialRead := Length(ABuffer);
+      ErrorPos := 'Buffer Len=' + IntToStr(InitialRead);
+      if InitialRead < MinTransactionSz + 1 then
+      Begin
+        if InitialRead > 0 then
+          FNextTransactionData := BufferAsAnsi(ABuffer);
+        Result := 0;
+        ISIndyUtilsException(Self,
+          'ReadOne#TransToBuffer :: InitialRead < MinTransactionSz + 1' +
           IntToStr(Result));
+        raise EIdReadTimeout.Create('InitialRead < MinTransactionSz + 1');
+      End;
+{$IFDEF DEBUG}
+      ss := BytesToTextString(BufferAsAnsi(ABuffer));
+      ErrorPos := 'BufferAsAnsi Len=' + IntToStr(InitialRead);
+{$ENDIF}
+      try
+        DecodeIndyTCPBaseTransStart(ABuffer, InitialRead, FullTransactionDataSz,
+          Key, Data);
+      Except
+        On E: EExceptionIsComsBadStart do
+        begin
+          ISIndyUtilsException(Self, E,
+            'ReadOne#TransToBuffer Decode IndyTCPBaseTransStart');
+          Try
+            // Keep Last Data
+            ISIndyUtilsException(Self, E, ' Last Key =' + FLastTransactionKey +
+              ' SZ=' + FLastTransactionSz + ' End of Last Data' + #13#10 +
+              BytesToTextString(FLastTransactionEnd));
+            // Keep Last Data
+
+            RecoverReadPosition(ABuffer, InitialRead, FullTransactionDataSz,
+              Key, Data);
+            Result := FullTransactionDataSz;
+            Exit;
+          Except
+            On EE: Exception do
+              ISIndyUtilsException(Self, EE,
+                'ReadOne#TransToBuffer Recover Read Position');
+          End;
+          InitialRead := Length(ABuffer);
+        end;
+        On G: Exception do
+        Begin
+          ISIndyUtilsException(Self, G,
+            'ReadOne#TransToBuffer Decode IndyTCPBaseTransStart');
+          Raise
+        End;
+      end;
+
+      // <1234KEYADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATA>
+
+      ErrorPos := 'Decode IndyTCPBaseTransStart';
+      LoopCount := 50;
+      if FullTransactionDataSz > 0 then
+      Begin
+        InitialRead := Length(ABuffer);
+        StillToRead := FullTransactionDataSz + MinTransactionSz + 1 -
+          InitialRead;
+
+        While (StillToRead > 0) {and (LoopCount>0) Exception} Do
+        Begin
+          FConnection.Socket.ReadBytes(ABuffer, -1, true);
+          // Read All available
+          if InitialRead >= Length(ABuffer) Then
+            Dec(LoopCount,3); // Go faster if no data
+          InitialRead := Length(ABuffer);
+          StillToRead := FullTransactionDataSz + MinTransactionSz + 1 -
+            InitialRead;
+          if StillToRead > 0 then
+          Begin
+            Dec(LoopCount);
+            if LoopCount < 0 then
+              raise EIdReadTimeout.Create
+                ('ReadBytes(ABuffer, -1, true) LoopCount');
+            Sleep(10); // Could be 10x50 mscs
+          End;
+        End;
+        // FConnection.Socket.ReadBytes(ABuffer, StillToRead, true);
+      End;
+      if Not InitialRead >= FullTransactionDataSz + MinTransactionSz then
+        ISIndyUtilsException(Self, 'ReadOne#TransToBuffer Too Little Data Sz ='
+          + IntToStr(InitialRead) + ' Req=' + IntToStr(FullTransactionDataSz +
+          MinTransactionSz))
+      else if ABuffer[FullTransactionDataSz + MinTransactionSz] <>
+        Ord(CTransactionEnd) then
+      Begin
+        ss := BytesToTextString(Copy(ABuffer, FullTransactionDataSz +
+          MinTransactionSz - 5, 10));
+        ISIndyUtilsException(Self, 'ReadOne#TransToBuffer no CTransactionEnd' +
+          #13#10 + ss);
+      End;
 
 {$IFDEF DEBUG}
-      ss := BufferAsAnsi(ABuffer);
-      ErrorPos := 'BufferAsAnsi Len=' + IntToStr(Result);
-{$ENDIF}
-      DecodeIndyTCPBaseTransStart(ABuffer, Result, FullTransactionDataSz,
-        Key, Data);
-      ErrorPos := 'DecodeIndyTCPBaseTransStart';
-      if FullTransactionDataSz > 0 then
-        FConnection.Socket.ReadBytes(ABuffer, FullTransactionDataSz, true);
-{$IFDEF DEBUG}
-      ss := BufferAsAnsi(ABuffer);
+      ss := BytesToTextString(BufferAsAnsi(ABuffer));
       ErrorPos := 'BufferAsAnsi 2 Len=' + IntToStr(Result);
 {$ENDIF}
       Result := Length(ABuffer);
@@ -3963,56 +4149,62 @@ begin
         Dec(WaitCount);
         If (TThread.CurrentThread.ThreadID = MainThreadID) then
         Begin
-          ApplicationProcessMessages;
-          ISIndyUtilsException(Self,
-            'ReadOneTransaction::ApplicationProcessMessages');
+          Try
+            ApplicationProcessMessages;
+          Except
+          End;
         End;
 {$IFDEF DEBUG}
         ss := E.Message;
 {$ENDIF}
-        if E is EIdConnClosedGracefully then
-          try
-            WaitCount := 0;
-            FConnection := nil;
-            FIOHandler := nil;
-            WasClosedForcfullyOrGracefully;
-          Except
-            on HH: Exception do
-              ISIndyUtilsException(Self, HH, 'ReadOneTransaction::HH:' + ss);
-          End
-        Else if E is EIdReadTimeout then
+        if E is EIdReadTimeout then
         Begin
           ss := E.ClassName + '::' + E.Message;
           if (WaitCount < 1) then
             // Handled by if E is EIdReadTimeout in ReadATransactionRecord
             raise; // Else try again
         end
-        else if E is EInvalidPointer then
-        begin
-          WaitCount := 0;
-          ISIndyUtilsException(Self, E, 'ReadOneTransaction::' + ErrorPos);
+        Else
+        Begin
+          ISIndyUtilsException(Self, E, 'Read#OneTransaction ' + ErrorPos);
+          if E is EIdConnClosedGracefully then
+            try
+              WaitCount := 0;
+              FConnection := nil;
+              FIOHandler := nil;
+              WasClosedForcfullyOrGracefully;
+            Except
+              on HH: Exception do
+                ISIndyUtilsException(Self, HH, 'Read#OneTransaction::HH:' + ss);
+            End
 
-        end
-        else if E is EExceptionIsComsNotExpected then
-          try
-            ss := E.ClassName + '::' + E.Message;
+          else if E is EInvalidPointer then
+          begin
             WaitCount := 0;
-            WasClosedForcfullyOrGracefully;
-          Except
-            on GG: Exception do
-              ISIndyUtilsException(Self, GG, 'ReadOneTransaction::GG');
-          End
-        else
-          try
-            ISIndyUtilsException(Self, E, 'ReadOneTransaction::E');
-            WaitCount := 0;
-            WasClosedForcfullyOrGracefully;
-          Except
-            on EE: Exception do
-              ISIndyUtilsException(Self, EE, 'ReadOneTransaction::EE');
-          End;
+            ISIndyUtilsException(Self, E, 'Read#OneTransaction::' + ErrorPos);
+
+          end
+          else if E is EExceptionIsComsNotExpected then
+            try
+              ss := E.ClassName + '::' + E.Message;
+              WaitCount := 0;
+              WasClosedForcfullyOrGracefully;
+            Except
+              on GG: Exception do
+                ISIndyUtilsException(Self, GG, 'Read#OneTransaction::GG');
+            End
+          else
+            try
+              ISIndyUtilsException(Self, E, 'Read#OneTransaction::E');
+              WaitCount := 0;
+              WasClosedForcfullyOrGracefully;
+            Except
+              on EE: Exception do
+                ISIndyUtilsException(Self, EE, 'Read#OneTransaction::EE');
+            End;
+        End;
       End;
-    end;
+    end; // Except On E:
   if FConnection = nil then
     WasClosedForcfullyOrGracefully;
 end;
@@ -4023,6 +4215,100 @@ Var
 begin
   Tst := FChnlStopWatch.Elapsed.Subtract(AGap);
   Result := Tst < FLastIncoming;
+end;
+
+procedure TISIndyTCPBase.RecoverReadPosition(var ABuffer: TIdBytes;
+  ACharsRead: integer; out ATransactionSize: Longword;
+  out AKey, ANewData: ansistring);
+Var
+  MsgBuf: TIdBytes;
+  Msg: ansistring;
+  BufStrtOffset, BufEndOffset, BufNxtOffset, DataRead, BufferSz:Integer;
+  // Reads all data currently available into buffer  Timeout=msecs
+  // Slides along data looking for ><1234KEYADATAADATA
+  // If it finds a valid transaction start
+  // returns the buffer at the start point
+  // reads the full transaction into the buffer if necessary
+  // returns Key, Transaction SZ and Data
+  // reports on error resolution
+begin
+  if FConnection = nil then
+    Exit;
+  if FConnection.Socket = nil then
+    Exit;
+  BufferSz := Length(ABuffer);
+  BufStrtOffset:=0;
+  BufEndOffset:=0;
+  BufNxtOffset:=0;
+  if BufferSz < 1 then
+    raise EExceptionIsComsNotExpected.Create
+      ('Error Recover#ReadPosition Empty Buffer');
+
+  if AnsiChar(ABuffer[0]) = '<' then
+    raise EExceptionIsComsNotExpected.Create
+      ('Error Recover#ReadPosition Buffer 0 "<"');
+
+  DataRead := 0;
+  Try
+    FConnection.Socket.ReadBytes(ABuffer, -1, true);
+  Except
+    On E: Exception do
+    Begin
+      ISIndyUtilsException(Self, E, 'Recover#ReadPosition shd not be here');
+      if DataRead <> 0 then
+        ISIndyUtilsException(Self, E, 'Recover#ReadPosition DataRead<>0 ');
+    End;
+  End;
+  Try
+    DataRead := Length(ABuffer);
+    if DataRead <= BufferSz then
+      ISIndyUtilsException(Self, 'Recover#ReadPosition DataRead <= BufferSz');
+    BufferSz := Length(ABuffer);
+
+    BufNxtOffset := 0;
+    BufStrtOffset := BufferPos('<', BufNxtOffset, BufferSz, ABuffer);
+    BufEndOffset := BufferPos('>', BufNxtOffset, BufferSz, ABuffer);
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'Recover#ReadPosition Find Next><');
+  End;
+  while (BufStrtOffset > 0) { or (BufEndOffset < 0) } do
+    Try
+      if BufStrtOffset > 0 then
+      begin
+        if IsValid(BufStrtOffset, BufNxtOffset, ABuffer, ACharsRead,
+          ATransactionSize, AKey, ANewData) then
+          Exit
+        Else if BufStrtOffset > 0 then
+        Begin
+          BufNxtOffset := BufStrtOffset + 1;
+          BufStrtOffset := BufferPos('<', BufNxtOffset, BufferSz, ABuffer);
+          BufEndOffset := BufferPos('>', BufNxtOffset, BufferSz, ABuffer);
+        End;
+      end;
+      if BufEndOffset > 0 then
+        if BufStrtOffset = BufEndOffset + 1 then
+        Begin
+          if BufEndOffset > 5 then
+            MsgBuf := (Copy(ABuffer, BufEndOffset - 4, 20))
+          else
+            MsgBuf := (Copy(ABuffer, BufEndOffset, 20));
+          Msg := BytesToTextString(MsgBuf);
+
+          ISIndyUtilsException(Self, 'Recover#ReadPosition "><" Found '#13#10 +
+            Msg);
+        end;
+
+      BufStrtOffset := BufferPos('<', BufNxtOffset, BufferSz, ABuffer);
+      BufEndOffset := BufferPos('>', BufNxtOffset, BufferSz, ABuffer);
+    Except
+      On E: Exception do
+      Begin
+        ISIndyUtilsException(Self, E, 'Recover#ReadPosition Loop');
+        BufStrtOffset := -1;
+        BufEndOffset := -1;
+      End;
+    End;
 end;
 
 function TISIndyTCPBase.RecoverTrnsString(AData: ansistring): String;
@@ -4250,8 +4536,10 @@ end;
 Class function TISIndyTCPBase.StreamAsString(AStrm: Tstream): ansistring;
 var
   Sz: Int64;
+{$IFNDEF NextGen}
   st: LongInt;
   Rptr: PAnsiChar;
+{$Endif}
 begin
   Result := '';
   if AStrm = nil then
@@ -4302,7 +4590,7 @@ begin
     end;
 end;
 
-procedure TISIndyTCPBase.SyncReturn(AMeathod: TThreadMethod);
+procedure TISIndyTCPBase.SyncReturn(AMethod: TThreadMethod);
 Var
   ThisThread: TThread;
 begin
@@ -4316,10 +4604,10 @@ begin
     // Warning: Do not call Synchronize from
     // within the main thread. This can cause an infinite loop.
     ThisThread := TThread.CurrentThread;
-    ThisThread.Synchronize(ThisThread, AMeathod);
+    ThisThread.Synchronize(ThisThread, AMethod);
   end
   else
-    AMeathod;
+    AMethod;
 end;
 
 function TISIndyTCPBase.TextID: String;
@@ -4328,13 +4616,22 @@ begin
   // Do not like abstract
 end;
 
+function TISIndyTCPBase.TextThreadDetails: String;
+begin
+  if FReadInMainThread then
+   Result:='Main Thread Read'
+  Else
+   Result:='Rd Thrd is '+IntToStr(FThreadID);
+end;
+
 {$IFNDEF  SuppressIPMetering}
 
 function TISIndyTCPBase.TickStatsAsString: String;
 Var
   SD: Double;
 begin
-  Result := TextID + '  (' + // IntToStr(FDisPatchSamples) + ' Dispatched )(' +
+  Result := TextID + '  (' +
+  // IntToStr(FDisPatchSamples) + ' Dispatched )(' +
     IntToStr(FReadTmSamples) + ' Read )';
   // + IntToStr(FProcTmSamples) + ' Processed )';
 
@@ -4933,6 +5230,7 @@ end;
 procedure TReadThread.Execute;
 begin
   try
+    Sleep(100); //Short delay to allow create completion
     while not Terminated do
     begin
       if FTCPConnection = nil then
@@ -5448,33 +5746,47 @@ end;
 
 function TISIndyTCPFullDuplexClient.ReadATransactionRecord(var ATrnctType
   : TTCPTransactionTypes; var AKey: ansistring): ansistring;
+Var
+  LInt: integer;
 begin
-  Inc(FLockCount);
-  fDplxReadCriticalSectionLock.Acquire;
-  Try
-    // Done := false;
-    Result := Inherited;
-    // while ATrnctType = FullDuplexMode do
-    // begin
-    // DoFullDuplexIncomingAction(Result); // then
-    // Result := Inherited;
-    // End;
-    { while not Done do
-      Case ATrnctType of
-      FullDuplexMode:
-      Begin
-      DoFullDuplexIncomingAction(Result);
-      Result := Inherited;
-      End;
-      FlgNull:
-      Result := Inherited;
-      Else
-      Done := true;
-      End; }
-  Finally
-    fDplxReadCriticalSectionLock.Release;
-    Dec(FLockCount);
+  LInt := 5;
+  While (LInt > 0) and Not fDplxReadCriticalSectionLock.TryEnter Do
+  Begin
+    Sleep(50);
+    Dec(LInt);
   End;
+  if LInt < 1 then
+  Begin
+    ISIndyUtilsException(Self, '# TryReadATrans Lock Fail' +
+      IntToStr(FLockCount));
+    Result := '';
+  end
+  Else
+    Try
+      Inc(FLockCount);
+      // Done := false;
+      Result := Inherited;
+      // while ATrnctType = FullDuplexMode do
+      // begin
+      // DoFullDuplexIncomingAction(Result); // then
+      // Result := Inherited;
+      // End;
+      { while not Done do
+        Case ATrnctType of
+        FullDuplexMode:
+        Begin
+        DoFullDuplexIncomingAction(Result);
+        Result := Inherited;
+        End;
+        FlgNull:
+        Result := Inherited;
+        Else
+        Done := true;
+        End; }
+    Finally
+      fDplxReadCriticalSectionLock.Release;
+      Dec(FLockCount);
+    End;
 end;
 
 function TISIndyTCPFullDuplexClient.ReadLoop: boolean;
@@ -5540,13 +5852,13 @@ begin
                 if FPermHold then
                 Begin
                   FLastIncoming := FChnlStopWatch.Elapsed;
-                  if GblLogAllChlOpenClose then
+                  if GblLogPollActions then
                     ISIndyUtilsException(Self,
                       '# No recent data but FPermHold so No OffThreadDestroy');
                 End
                 else
                 begin
-                  if GblLogAllChlOpenClose or GblRptTimeoutClear then
+                  if GblLogAllChlOpenClose or GblRptTimeoutClear or GblLogPollActions then
                     ISIndyUtilsException(Self,
                       '# OffThreadDestroy ::If not RecentData(FPoleInterval * 4)');
                   OffThreadDestroy(true);
@@ -5563,7 +5875,8 @@ begin
             end;
         Else
           Begin
-            FLastIncoming := FChnlStopWatch.Elapsed; // is not an error
+            FLastIncoming := FChnlStopWatch.Elapsed;
+            // is not an error
             ProcessNonDuplexIncomingTransaction(Data, Key, TrnctType);
           End;
         End;
@@ -5687,7 +6000,7 @@ begin
   Result := false;
   If not CheckConnection then
   begin
-    ISIndyUtilsException(Self, '#' + 'Exit If not CheckConnection then');
+    ISIndyUtilsException(Self, '#' + 'Exit If not CheckConnection ::'+ALinkThisValue);
     Exit;
   end;
   if ALinkThisValue = '' then
@@ -5839,12 +6152,13 @@ begin
   // ms between read actions Makes 5 attempts before Exiting Read Transaction
   // inherited StartAccess(AServerName, APort, ADoAfterConnection);
   FLastIncoming := FChnlStopWatch.Elapsed;
+
   SetFullDuplex(true);
   fReadThread.Start;
   fWriteThread.Start;
 end;
 
-procedure TISIndyTCPFullDuplexClient.SyncReturn(AMeathod: TThreadMethod);
+procedure TISIndyTCPFullDuplexClient.SyncReturn(AMethod: TThreadMethod);
 begin
   if fDplxReadCriticalSectionLock.TryEnter then
     try
@@ -5882,7 +6196,7 @@ begin
     { }
   Except
     On E: Exception do
-      ISIndyUtilsException(Self, E, 'SyncReturnDuplxCltNW');
+      ISIndyUtilsException(Self, E, 'Sync#ReturnDuplxCltNW');
   End;
 end;
 
@@ -5907,7 +6221,11 @@ begin
             fFullDuplex := true;
         Finally
           fDplxReadCriticalSectionLock.Release;
-        end;
+        end
+      Else
+    Else
+      ISIndyUtilsException(Self, '# TrySetFullDuplex Lock Fail');
+
   Result := fFullDuplex;
 end;
 
@@ -6015,15 +6333,17 @@ begin
               Else
                 ISIndyUtilsException(Self, '# Poll Fail WriteLoop ' + TextID);
           End;
-        if Result then
+        if Result then // if not result then terminate
         Begin
           if fDplxWriteNoWaitCriticalSectionLock = nil then
           Begin
-            Sleep(100);
             // ISIndyUtilsException(Self,TextId+'# fDplxWriteNoWaitCriticalSectionLock = nil in loop');
+            Sleep(1000);
           End
+          else if (FWaiting = nil) And (FNoWaitRtnThrdData = nil) then
+            Sleep(1000)
           else
-            Sleep(5);
+            Sleep(3);
         End;
       Except
         On E: Exception Do
@@ -6056,6 +6376,7 @@ end;
 procedure TWriteThread.Execute;
 begin
   Try
+    Sleep(100); //Short delay to allow create completion
     while not Terminated do
     begin
       if FTCPConnection = nil then
@@ -6680,7 +7001,7 @@ begin
     { }
   Except
     On E: Exception do
-      ISIndyUtilsException(Self, E, 'Sync Rtn');
+      ISIndyUtilsException(Self, E, 'Sync#ReturnNW');
   End;
 end;
 
@@ -6707,6 +7028,7 @@ function TNoWaitReturnThread.TrdTCPClient: TISIndyTCPClient;
 Var
   KillClient: boolean;
 begin
+  Result:=nil;
   Try
     FLock.Acquire;
     try
@@ -6772,6 +7094,8 @@ begin
 end;
 
 function TTimeRec.DeltaMilliSecs(ARef: TDateTime): Double;
+// Timestamp must be in the past if Aref = 0 or earlier than Timestamp use Now
+// MilliSeconds
 Var
   SecDbl: Double;
   Time, TimeNow: Double;
@@ -6782,9 +7106,10 @@ begin
   Else
   Begin
     if ARef < Time then
-      TimeNow := Now
+      TimeNow := Now // Diff between Timestamp and Now
     else
-      TimeNow := ARef;
+      TimeNow := ARef; // Diff between Timestamp and Ref Time
+    // where Timestamp < RefTime
     Time := TimeNow - FDateTime;
     SecDbl := Time;
     if SecDbl < 0 then
@@ -6931,7 +7256,7 @@ Begin
       on E: Exception do
         LogFin.LogALine('Finalization Exception =' + E.Message);
     End;
-    GCountOfConnections := 0;
+//    GCountOfConnections := 0;
   Finally
     LogFin.Free;
   End;
@@ -7053,8 +7378,12 @@ Initialization
 
 // Set in inititalize
 cDuplexInactiveTime := TTimeSpan.FromMinutes(5); // 5 minutes
+{$IFDEF FPC}
+c30SecondsDateTime := 30 / 24 / 60 / 60;
+{$ELSE}
 c30SecondsDateTime := TTimeSpan.FromSeconds(30);
-// = 0.5 / 24 / 60; // 40 Seconds
+{$ENDIF}
+// = 0.5 / 24 / 60; // 30 Seconds
 cStart80TransactionAllowence := TTimeSpan.FromMilliseconds(5);
 // 1 / 24 / 60 / 60 / 200; // 5msec
 

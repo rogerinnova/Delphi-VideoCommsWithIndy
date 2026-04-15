@@ -31,7 +31,12 @@ uses
 {$IFDEF NextGen}
   IsNextGenPickup,
 {$ENDIF}
-  TimeSpan, Classes, SysUtils, UITypes, // IsStrUtl,
+{$IFDEF FPC}
+  IsLazTimeSpan,
+{$ELSE}
+  TimeSpan,
+{$ENDIF}
+  Classes, SysUtils, UITypes, // IsStrUtl,
   ISRemoteConnectionIndyTCPObjs;
 
 Type
@@ -41,6 +46,9 @@ Type
 {$ELSE}
   TInGraphicProc = Procedure(AGraphic: TBitMap) of Object;
 {$ENDIF}
+
+  EExceptionIsMedia = class(Exception)
+  end;
 
   TVideoComsChannel = Class(TISIndyTCPFullDuplexClient)
   Private
@@ -85,6 +93,8 @@ Type
       write FOnInComingGraphic;
     Property InComingGraphicsActive: Boolean read FOpenGraphicChannelToActiveRx;
     Property OutGoingGraphicsRequested: Boolean read FOutGoingGraphicsRequested;
+    Property LastRxOrAcknowledgeGraphic: TTimeSpan
+      read FLastRxOrAcknowledgeGraphic;
   end;
 
   TMediaCommands = (OpenTraffic, CloseTraffic, AcceptFMXBitmap, CloseTxCircuit,
@@ -111,6 +121,9 @@ Const
   ObjStmIconObj = 96;
   ObjStmJPEGObj = 22;
   ObjStmGraphEnd = 11;
+
+Var
+  CBitmapDelayms: integer = 6000;
 
 implementation
 
@@ -222,6 +235,7 @@ end;
 function TVideoComsChannel.DoFullDuplexIncomingAction
   (AData: AnsiString): Boolean;
 Var
+  Duration: TTimeSpan;
   TstTmStmp: TTimeRec; // Temp until all senders suport TTimeRec;
   StageComplete: AnsiString;
 {$IFDEF UseVCLBITMAP}
@@ -279,8 +293,9 @@ begin
             End;
           If TstTmStmp.FromTransString(AData) then
             // Temp until all senders suport TTimeRec;
-            If not TstTmStmp.DelayOfLessThan(10000) then
-              LogTimeStampFail(AData, 'Fail Bitmap Timer::');
+            If not TstTmStmp.DelayOfLessThan(CBitmapDelayms) then
+              LogTimeStampFail(AData, 'Fail Bitmap Timer >' +
+                IntToStr(Trunc(CBitmapDelayms / 1000)) + 'Sec ::');
           FOpenGraphicChannelToActiveRx := true;
           StageComplete := 'Start FOutGoingGraphicsRequested';
           If FOutGoingGraphicsRequested then
@@ -303,6 +318,12 @@ begin
       ISIndyUtilsException(Self, 'No Decode DoFullDuplexIncomingAction::' +
         FLastPayload);
     end;
+
+    Duration := FChnlStopWatch.Elapsed - FLastDuplexTime;
+    if Duration.TotalSeconds > 2.5 then
+      ISIndyUtilsException(Self, 'DoFullDuplexIncomingAction Processing Time ='
+        + Duration.ToString)
+
   Except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'DoFullDuplexIncomingAction>>' +
@@ -328,6 +349,8 @@ begin
   TimeStmp.SetValue(Now);
   Result := FullDuplexDispatch(MediaCommandArray[OpenTraffic] +
     TimeStmp.TransString, '');
+  if GblLogPollActions then
+    ISIndyUtilsException(Self, 'Open# Traffic on ' + TextID);
 end;
 
 class function TVideoComsChannel.PackGraphic(AGraphic: Pointer): AnsiString;
@@ -367,7 +390,7 @@ begin
         GType := ObjStmJPEGObj
 {$ENDIF}
       else
-        raise EExceptionIsComsNotExpected.create('Invalid Graphic to File');
+        raise EExceptionIsMedia.create('Invalid Graphic to File');
 
       MStrm.Write(GType, SizeOf(GType));
       if GType <> ObjStmNullFlag then
@@ -509,12 +532,14 @@ class function TVideoComsChannel.StreamAsString(AStrm: TStream): AnsiString;
 // From IsStrUtl
 var
   Sz: int64;
+{$IFNDEF NextGen}
   st: LongInt;
   Rptr: PAnsiChar;
+{$Endif}
 begin
   Sz := AStrm.Size;
   if Sz > 20000000 then
-    raise Exception.create('StreamAsString 20 Meg Limit');
+    raise EExceptionIsMedia.create('StreamAsString 20 Meg Limit');
   Try
     AStrm.seek(0, TSeekOrigin.soBeginning);
 {$IFDEF NextGen}
@@ -529,15 +554,17 @@ begin
 {$ENDIF}
   Except
     On E: Exception do
-      raise Exception.create('StreamAsString Error::' + E.Message);
+      raise EExceptionIsMedia.create('StreamAsString Error::' + E.Message);
   End;
 end;
 
 Class procedure TVideoComsChannel.StringAsStrm(AData: AnsiString;
   AStm: TStream);
 // From IsStrUtl
+{$IFNDEF NextGen}
 var
   B: PAnsiChar;
+{$ENDIF}
 begin
   if AStm = nil then
     Exit;
@@ -561,15 +588,20 @@ Var
   // Class Function RecoverGraphic(AData: AnsiString): TBitMap;
 {$ENDIF}
 begin
-  If Assigned(FOnInComingGraphic) then
-  Begin
-    BitMap := nil;
-    try
-      FOnInComingGraphic(BitMap);
-    finally
-      FreeAndNil(BitMap);
+  Try
+    If Assigned(FOnInComingGraphic) then
+    Begin
+      BitMap := nil;
+      try
+        FOnInComingGraphic(BitMap);
+      finally
+        FreeAndNil(BitMap);
+      end;
     end;
-  end;
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'Synced#CheckCloseGraphicWithNil');
+  End;
 end;
 
 procedure TVideoComsChannel.SyncedIncomingGraph;
@@ -582,15 +614,20 @@ Var
   // Class Function RecoverGraphic(AData: AnsiString): TBitMap;
 {$ENDIF}
 begin
-  If Assigned(FOnInComingGraphic) then
-  Begin
-    BitMap := RecoverGraphic(FLastPayload);
-    try
-      FOnInComingGraphic(BitMap);
-    finally
-      FreeAndNil(BitMap);
+  Try
+    If Assigned(FOnInComingGraphic) then
+    Begin
+      BitMap := RecoverGraphic(FLastPayload);
+      try
+        FOnInComingGraphic(BitMap);
+      finally
+        FreeAndNil(BitMap);
+      end;
     end;
-  end;
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'Synced#IncomingGraph');
+  End;
 end;
 
 {$IFDEF UseVCLBITMAP}
@@ -624,6 +661,7 @@ end;
 
 function TVideoComsChannel.Write(AData: RawByteString): integer;
 begin
+  Result := -1;
   Try
     FLastTx := FChnlStopWatch.Elapsed;
     Result := Inherited;

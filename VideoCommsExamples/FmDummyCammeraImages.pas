@@ -34,6 +34,7 @@ type
     BtnCloseLog: TButton;
     BtnEcho: TButton;
     BtnStopVideo: TButton;
+    BtnAllLogsToServer: TButton;
     procedure BtnRestartLinkClick(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
     procedure FormCreate(Sender: TObject);
@@ -44,6 +45,8 @@ type
     procedure BtnLoadLogClick(Sender: TObject);
     procedure BtnEchoClick(Sender: TObject);
     procedure BtnStopVideoClick(Sender: TObject);
+    procedure CmbxServerSelChange(Sender: TObject);
+    procedure BtnAllLogsToServerClick(Sender: TObject);
   private
     { Private declarations }
 
@@ -52,7 +55,7 @@ type
     fKnownServers: TStringList;
     FCurSrvConnectionString: string;
 
-    FImagesActuallySent,FCameraImages,FStep: integer;
+    FImagesActuallySent, FCameraImages, FStep: integer;
     FConnectionToServer: TVideoComsChannel;
     // FConnectionToExtServer, FConnectionFrmExtServer, FConnectionToExtServer2,
     // FConnectionFrmExtServer2: TVideoComsChannel;
@@ -60,6 +63,7 @@ type
     Function ConnectionToServer: TVideoComsChannel;
     // Function ConnectionToExtServer(AStep: integer): TVideoComsChannel;
     Procedure ShowLogFile; // Puts Logfile in Memo
+    Procedure AllLogsToServer;
     Function MediaDevices: TIsMediaCapture;
     Procedure LoadIniDetails;
     Procedure SaveIniDetails;
@@ -88,6 +92,79 @@ implementation
 
 uses IsObjectTimeSpanRecording, IsIndyUtils, IsLogging, IsGblLogCheck;
 
+procedure TFmDummyCamerraForTestingSrvr.AllLogsToServer;
+Var
+  IndexFileName, NewName, OldName, SrvFileName: String;
+{$IFDEF Debug}
+  DebugTxt: AnsiString;
+  Txt: Pointer;
+  ToSend: integer;
+{$ENDIF}
+  TxFile: TFileStream;
+  CanDelete: boolean;
+  FileRec: TSearchRec;
+  ControlChn: TISIndyTCPClient;
+  Sent: integer;
+  Srv: string;
+  Port: integer;
+
+begin
+  If FCurSrvConnectionString = '' then Exit;
+
+
+  If TISIndyTCPBase.ExpandSrvRefCode(FCurSrvConnectionString, Srv, Port) then
+  Begin
+  ControlChn := TISIndyTCPClient.StartAccess(srv,Port,nil);
+  End
+  Else ControlChn:=nil;
+
+  CanDelete := false;
+  if ControlChn<>nil then
+  Try
+    if ControlChn.Active then
+    Begin
+      OldName := ExceptionLogName;
+      CanDelete := true;
+      Sent := 0;
+      IndexFileName := 'FrmMobilPort'+IntToStr(ControlChn.LocalPort);
+
+      if CanDelete then
+      Begin
+        if FindFirst(ChangeFileExt(OldName, '*.Log'), faNormal, FileRec) = 0
+        then
+          while CanDelete do
+          Begin
+            inc(Sent);
+            if Sent > 6 then
+              Exit;
+            NewName := FileRec.Name;
+            TxFile := TFileStream.Create(NewName, fmopenread + fmShareDenyNone);
+            Try
+              SrvFileName := 'Temp\' + IndexFileName + '-' +
+                FormatDateTime('dd_mmmm-hh_nn_ss.zzz', now) + '.log';
+              CanDelete := ControlChn.PutLargeStreamToServer(TxFile,
+                SrvFileName);
+              if CanDelete then
+                DeleteFile(NewName);
+              CanDelete := FindNext(FileRec) = 0;
+            Finally
+              TxFile.Free;
+            End;
+          End;
+        FindClose(FileRec);
+      End;
+    End;
+  Finally
+    ControlChn.Free;
+  End;
+end;
+
+procedure TFmDummyCamerraForTestingSrvr.BtnAllLogsToServerClick
+  (Sender: TObject);
+begin
+  AllLogsToServer;
+end;
+
 procedure TFmDummyCamerraForTestingSrvr.BtnCloseLogClick(Sender: TObject);
 begin
   MMoLogData.Visible := false;
@@ -95,32 +172,32 @@ end;
 
 procedure TFmDummyCamerraForTestingSrvr.BtnEchoClick(Sender: TObject);
 Var
-  S,Msr: AnsiString;
+  S, Msr: AnsiString;
   TstClient: TISIndyTCPClient;
 begin
   if FConnectionToServer = nil then
     Exit;
   TstClient := nil;
   try
-    gblMeterSleep:=0;
+    gblMeterSleep := 0;
     TstClient := TISIndyTCPClient.StartAccess(FConnectionToServer.Address,
       FConnectionToServer.Port);
-    s:='Echo Test';
+    S := 'Echo Test';
 {$IFNDEF  SuppressIPMetering}
-  AddSetMeteredTimeRecAsString(S, 'Echo');
+    AddSetMeteredTimeRecAsString(S, 'Echo');
 {$ENDIF}
-    s:=TstClient.EchoFromServer(s);
+    S := TstClient.EchoFromServer(S);
 {$IFNDEF  SuppressIPMetering}
-    if SplitMeteredData(s,Msr) then
-      begin
-        MMoLogData.Lines.Clear;
-        MMoLogData.Lines.Add('Echo Response');
-        MMoLogData.Lines.Add(s);
-        MMoLogData.Lines.Add(#13#10'Metering for ' + TstClient.TextID);
-        if not StringsFrmMeteredData(MMoLogData.Lines, Msr) then
-            ISIndyUtilsException(self, 'Time Metered Fail Echo');
-        MMoLogData.Visible:=true;
-      end;
+    if SplitMeteredData(S, Msr) then
+    begin
+      MMoLogData.Lines.Clear;
+      MMoLogData.Lines.Add('Echo Response');
+      MMoLogData.Lines.Add(S);
+      MMoLogData.Lines.Add(#13#10'Metering for ' + TstClient.TextID);
+      if not StringsFrmMeteredData(MMoLogData.Lines, Msr) then
+        ISIndyUtilsException(self, 'Time Metered Fail Echo');
+      MMoLogData.Visible := true;
+    end;
 {$ENDIF}
   finally
     TstClient.Free;
@@ -175,13 +252,13 @@ end;
 
 procedure TFmDummyCamerraForTestingSrvr.BtnStopVideoClick(Sender: TObject);
 begin
-   FVideoDisable:=  not FVideoDisable;
-   If FMediaDevices<>nil then
-      FMediaDevices.ActivateDeactivateVideo(-1, FVideoDisable);
-   if FVideoDisable then
-     BtnStopVideo.Text:='Start Video'
-    else
-     BtnStopVideo.Text:='Stop Video';
+  FVideoDisable := not FVideoDisable;
+  If FMediaDevices <> nil then
+    FMediaDevices.ActivateDeactivateVideo(-1, FVideoDisable);
+  if FVideoDisable then
+    BtnStopVideo.Text := 'Start Video'
+  else
+    BtnStopVideo.Text := 'Stop Video';
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.ClientConnectedReturn(Sender: TObject);
@@ -193,6 +270,21 @@ begin
       TISIndyTCPClient(Sender).TextID)
   Else
     ISIndyUtilsException(self, 'UnExpected Call to ClientConnectedReturn');
+end;
+
+procedure TFmDummyCamerraForTestingSrvr.CmbxServerSelChange(Sender: TObject);
+Var
+  idx: integer;
+  sel: string;
+begin
+  if Sender = CmbxServerSel then
+  begin
+    idx := CmbxServerSel.ItemIndex;
+    if idx > -1 then
+      if not SameText(CmbxServerSel.Items[idx], EdtServerUrl.Text) then
+        EdtServerUrl.Text := CmbxServerSel.Items[idx];
+
+  end;
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.CommsDestroy(ASender: TObject);
@@ -241,7 +333,7 @@ begin
           Port := CListeningPort;
         end;
         FConnectionToServer := TVideoComsChannel.StartAccess(Srv, Port);
-        FConnectionToServer.PermHold := True;
+        FConnectionToServer.PermHold := true;
         FConnectionToServer.OnDestroy := CommsDestroy;
         // Would also be set by adding to manager
         Result := FConnectionToServer;
@@ -284,8 +376,8 @@ end;
 procedure TFmDummyCamerraForTestingSrvr.DelayedSetup;
 // Delay some create concepts to allow for Android
 Var
-  IniFile: TIniFile;
-  BaseDir: String;
+  // IniFile: TIniFile;
+  // BaseDir: String;
   LogPurge: TLogFile;
 begin
   Try
@@ -307,8 +399,9 @@ begin
     // False{GblLogPollActions},False{GblRptRegConnectiononSrvr},
     // False{GblRptIsCommsConnectionAttempts});
     TGblRptComs.ReportObjectTypes; // Start Counting
+    EdtServerUrl.Text := 'scripts.innovasolutions.com.au:1777'; // For testing
     UpdateConnections;
-    FDelayFormCreateActions := True;
+    FDelayFormCreateActions := true;
   Except
     On E: exception do
       ISIndyUtilsException(self, E, 'Delay Setup');
@@ -319,7 +412,7 @@ procedure TFmDummyCamerraForTestingSrvr.FormCreate(Sender: TObject);
 var
   LogPurge: TLogFile;
 begin
-  GblRptSendImages := True;
+  GblRptSendImages := true;
   LogPurge := nil;
   Try
     Try
@@ -337,7 +430,7 @@ end;
 
 procedure TFmDummyCamerraForTestingSrvr.FormDestroy(Sender: TObject);
 begin
-  FFormInDestroy := True;
+  FFormInDestroy := true;
   BtnResetClick(nil);
   FreeAndNil(fKnownServers);
   GblIndyComsObjectFinalize;
@@ -355,7 +448,7 @@ begin
   if fKnownServers = nil then
   begin
     fKnownServers := TStringList.Create;
-    fKnownServers.OwnsObjects := True;
+    fKnownServers.OwnsObjects := true;
     fKnownServers.CaseSensitive := false;
   end
   else
@@ -389,15 +482,18 @@ function TFmDummyCamerraForTestingSrvr.MediaDevices: TIsMediaCapture;
 begin
   if FMediaDevices = nil then
   Begin
-    FMediaDevices := TIsMediaCapture.Create(1000, 1000, True{false},True{false}, True);
+    FMediaDevices := TIsMediaCapture.Create(1000, 1000, true { false } ,
+      true { false } , true);
     // 1000x1000 bitmap.nosync,nolocalbitmapsync,makedummy);
     FMediaDevices.SetBitmap(ImgLocalCamera.Bitmap,
       FMediaDevices.DefaultCameraSelect);
     FMediaDevices.OnSendBitMap := SentBitMapEvent;
-    FMediaDevices.SetVideoReturn(OnCameraData,FMediaDevices.DefaultCameraSelect);
-    FVideoDisable:= Not False;
-    BtnStopVideoClick(nil);   // FMediaDevices.ActivateDeactivateVideo(-1, FVideoDisable);
-    FVideoDisable:=False;
+    FMediaDevices.SetVideoReturn(OnCameraData,
+      FMediaDevices.DefaultCameraSelect);
+    FVideoDisable := Not false;
+    BtnStopVideoClick(nil);
+    // FMediaDevices.ActivateDeactivateVideo(-1, FVideoDisable);
+    FVideoDisable := false;
   End;
   // FMediaDevices.AddVideoCommsChannel(FConnectionToExtServer);
   FMediaDevices.AddVideoCommsChannel(FConnectionToServer);
@@ -407,16 +503,17 @@ end;
 procedure TFmDummyCamerraForTestingSrvr.OnCameraData(ADevice: TCaptureDevice;
   ATime: TDateTime);
 begin
- Inc(FCameraImages);
- //Returns are synced at create
- LblCamera.Text:='Camera Images = '+IntToStr(FCameraImages)+' as at '+Formatdatetime('nn:ss.zzz',now);
+  inc(FCameraImages);
+  // Returns are synced at create
+  LblCamera.Text := 'Camera Images = ' + IntToStr(FCameraImages) + ' as at ' +
+    FormatDateTime('nn:ss.zzz', now);
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.SaveIniDetails;
 Var
   IniFile: TIniFile;
   i: integer;
-  Idx: integer;
+  idx: integer;
 begin
   if fKnownServers = nil then
     Exit;
@@ -426,12 +523,12 @@ begin
     if FCurSrvConnectionString <> '' then
     Begin
       IniFile.WriteString('Servers', 'CurrentSvr', FCurSrvConnectionString);
-      Idx := fKnownServers.IndexOf(FCurSrvConnectionString);
-      If Idx < 0 then
+      idx := fKnownServers.IndexOf(FCurSrvConnectionString);
+      If idx < 0 then
         fKnownServers.Insert(0, FCurSrvConnectionString)
-      else if Idx > 0 then
+      else if idx > 0 then
       begin
-        fKnownServers.Delete(Idx);
+        fKnownServers.Delete(idx);
         fKnownServers.Insert(0, FCurSrvConnectionString);
       end;
     End;
@@ -447,13 +544,13 @@ end;
 procedure TFmDummyCamerraForTestingSrvr.SentBitMapEvent(ABitMap: TBitMap;
   ASentImages: integer);
 begin
-  if ASentImages>0 then
-     Inc(FImagesActuallySent);
-  LblImagesSent.Text := IntToStr(FImagesActuallySent)+' Images Sent to ' + IntToStr(ASentImages) + ' Channels at '+
-    FormatDateTime('nn:ss.zzz',now) ;
+  if ASentImages > 0 then
+    inc(FImagesActuallySent);
+  LblImagesSent.Text := IntToStr(FImagesActuallySent) + ' Images Sent to ' +
+    IntToStr(ASentImages) + ' Channels at ' + FormatDateTime('nn:ss.zzz', now);
   if ABitMap <> nil then
   Begin
-    ImgSent.Visible := True;
+    ImgSent.Visible := true;
     ImgSent.Bitmap.Assign(ABitMap);
   End
   else
@@ -514,39 +611,49 @@ Var
   S: AnsiString;
   Sz: Int64;
 begin
-  if FFormInDestroy then
-    Exit;
-  MMoLogData.Visible := True;
-  MMoLogData.Lines.Clear;
-  Application.ProcessMessages;
-  if FileExists(ExceptionLogName) then
-    try
-      Log := TFileStream.Create(ExceptionLogName, fmOpenRead, fmShareDenyNone);
+  Try
+    if FFormInDestroy then
+      Exit;
+    MMoLogData.Visible := true;
+    MMoLogData.Lines.Clear;
+    Application.ProcessMessages;
+    if FileExists(ExceptionLogName) then
       try
-        Sz := Log.Size;
+        Log := TFileStream.Create(ExceptionLogName, fmopenread,
+          fmShareDenyNone);
+        try
+          Sz := Log.Size;
 {$IFDEF NextGen}
-        s.Length:=Sz;
-        Log.Read(S, Sz);
+          S.Length := Sz;
+          // Log.Read(S, Sz);
 {$ELSE}
-        SetLength(S, Sz);
-        Log.Read(S[1], Sz);
+          SetLength(S, Sz);
+          Log.Read(S[1], Sz);
 {$ENDIF}
-        MMoLogData.Text := 'Log File Data' + crlf + S;
-      finally
-        Log.Free;
+          MMoLogData.Text := 'Log File Data' + crlf + S;
+        finally
+          Log.Free;
+        end;
+      Except
+        On E: exception do
+          ISIndyUtilsException(self, E, 'Log File Read Fail');
       end;
-    Except
-      On E: exception do
-        ISIndyUtilsException(self, E, 'Log File Read Fail');
-    end;
-  if ExceptLog = nil then
-    OpenAppLogging(True, '', false { GblLogAllChlOpenClose } ,
-      false { GlobalTCPLogAllData } , false { GblLogPollActions } ,
-      false { GblRptRegConnectiononSrvr } ,
-      false { GblRptIsCommsConnectionAttempts } );
 
-  if ExceptLog <> nil then
-    ExceptLog.RollAndFlagNewApplication(True);
+{$IFNDEF NextGen}
+    // Temp Problem
+    if ExceptLog = nil then
+      OpenAppLogging(true, '', false { GblLogAllChlOpenClose } ,
+        false { GlobalTCPLogAllData } , false { GblLogPollActions } ,
+        false { GblRptRegConnectiononSrvr } ,
+        false { GblRptIsCommsConnectionAttempts } );
+
+    if ExceptLog <> nil then
+      ExceptLog.RollAndFlagNewApplication(true);
+{$ENDIF}
+  Except
+    On E: exception do
+      ISIndyUtilsException(self, E, 'Log File Outer loop');
+  End;
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.Test8;
@@ -639,13 +746,13 @@ begin
       BtnRestartLink.Text := 'Retry ' + FormatDateTime('nn:ss', now);
   finally
     Timer1.Interval := 5000;
-    Timer1.Enabled := True;
+    Timer1.Enabled := true;
   end;
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.UpdateConnections;
 Var
-  Idx: integer;
+  idx: integer;
   Url: string;
   Port: integer;
 begin
@@ -675,10 +782,10 @@ begin
   End;
   CmbxServerSel.Clear;
   CmbxServerSel.Items.AddStrings(fKnownServers);
-  Idx := CmbxServerSel.Items.IndexOf(FCurSrvConnectionString);
-  if Idx >= 0 then
+  idx := CmbxServerSel.Items.IndexOf(FCurSrvConnectionString);
+  if idx >= 0 then
   Begin
-    CmbxServerSel.ItemIndex := Idx;
+    CmbxServerSel.ItemIndex := idx;
     EdtServerUrl.Text := FCurSrvConnectionString;
   End;
 

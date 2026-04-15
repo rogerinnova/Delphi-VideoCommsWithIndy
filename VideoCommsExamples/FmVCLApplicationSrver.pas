@@ -1,17 +1,41 @@
 unit FmVCLApplicationSrver;
+{$IFDEF FPC}
+{$MODE Delphi}
+// {$I InnovaLibDefsLaz.inc}
+{$H+}
+{$ELSE}
+// {$I InnovaLibDefs.inc}
+{$ENDIF}
 
+// Compile Windows 32 Optimisation False
 interface
 
 uses
-  Winapi.Windows, Winapi.Messages, System.DateUtils, System.SyncObjs,
+{$IFDEF FPC}
+  {Windows,} Messages,
+  DateUtils, SyncObjs,
+  IniFiles, IsLazTimeSpan,
+  SysUtils, {IOUtils,}
+  Variants, Classes, Graphics,
+  Controls, Forms, Dialogs, StdCtrls, ExtCtrls,
+  IsLazarusPickup,
+{$ELSE}
+  Winapi.Windows, Winapi.Messages,
+  System.DateUtils, System.SyncObjs,
   System.IniFiles, TimeSpan,
   System.SysUtils, System.IOUtils,
-  System.Variants, System.Classes, Vcl.Graphics,
-  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ExtCtrls, ISProcCl,
-  IsIndyTCPApplicationServer, IsRemoteConnectionIndyTCPObjs, Vcl.Imaging.jpeg,
-  IsMediaCommsObjs, IsImageManagerVCL, Vcl.Mask;
+  System.Variants, System.Classes,
+  Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ExtCtrls,
+  Vcl.Imaging.jpeg, Vcl.Mask,
+{$ENDIF}
+  ISProcCl,
+  IsIndyTCPApplicationServer, IsRemoteConnectionIndyTCPObjs,
+  IsMediaCommsObjs, IsImageManagerVCL;
 
 type
+
+  { TServerForm }
 
   TServerForm = class(TForm)
     PnlTop: TPanel;
@@ -88,10 +112,10 @@ type
     FWaitSync: TCriticalSection;
     FCommsServer, FSecondaryComsServer: TIsIndyApplicationServer;
     // FCameraVideoChnl,
-    FRxVideoChnl, FSendVideoChnl: TVideoComsChannel;
     FTestServer: TIsMonitorTCPAppServer;
     // FSimpleClient: TISIndyTCPClient;
     // FDuplexClientAdvertised, FDuplexClientLinked,
+    FRxVideoChnl, FSendVideoChnl: TVideoComsChannel;
     FNoWaitCntrlChl: TNoWaitReturnThread;
     FSendMessageback: TISIndyTCPFullDuplexClient;
     FFwdTst: TISIndyTCPFullDuplexClient;
@@ -101,6 +125,7 @@ type
     FCurSrvListeningPort: integer;
     FCurSrvConnectionString: string;
     FUseExternalServer: Boolean;
+    FNextStatusTimer, FNextCleanupTimer: TDateTime;
     Procedure BusyStart;
     Procedure BusyEnd;
     Procedure LoadIniDetails;
@@ -138,6 +163,7 @@ type
     Procedure ShowLogFile; // Puts Logfile in Memo
     Procedure MmoStartTest(AMsg: string);
     Procedure ClearOldSessions;
+    Procedure CheckExistingConnections;
   public
     { Public declarations }
   end;
@@ -148,12 +174,18 @@ var
 implementation
 
 Uses
+{$IFDEF Debug}
 {$IFDEF TestFastMM}
   ISFastMMInit,
-{$ENDIF }
+{$ENDIF}
+{$ENDIF}
   isGeneralLib, IsGblLogCheck, CommsDemoCommonValues,
   IsIndyUtils, IsIndyLib, IsObjectTimeSpanRecording, IsLogging;
+{$IFDEF FPC}
+{$R *.lfm}
+{$ELSE}
 {$R *.dfm}
+{$ENDIF}
 
 { TServerForm }
 Const
@@ -165,6 +197,7 @@ Var
   Port, Idx: integer;
   Clt: TISIndyTCPClient;
 begin
+  Clt:=nil;
   try
     if fKnownServers = nil then
       LoadIniDetails;
@@ -221,6 +254,7 @@ begin
     FCurSrvListeningPort := Port;
     FCurSrvConnectionString := Srv + ':' + IntToStr(FCurSrvListeningPort);
     BtnExternalServer.Caption := 'Will Call ' + FCurSrvConnectionString;
+    CheckExistingConnections;
   Except
     On E: exception do
       ISIndyUtilsException(self, E, 'ConnectionToServer');
@@ -237,7 +271,7 @@ begin
     BusyStart;
     MmoStartTest('Check Lnk State Test');
     LocalDuplex := nil;
-    LocalDuplex2 := nil;
+//    LocalDuplex2 := nil;
     LocalClient := TISIndyTCPClient.StartAccess(FCurSrvAddress,
       FCurSrvListeningPort, ClientConnectedReturn);
     try
@@ -266,7 +300,7 @@ begin
           MmoRexData.Lines.Add('Error:' + Response);
       End;
       Application.ProcessMessages;
-      FreeAndNilDuplexChannel(LocalDuplex);
+      FreeAndNilDuplexChannel(Pointer(LocalDuplex));
       LocalDuplex := TISIndyTCPFullDuplexClient.StartAccess(FCurSrvAddress,
         FCurSrvListeningPort, ClientConnectedReturn);
       LocalDuplex.ServerConnections(nil, 'TestRegLink');
@@ -317,8 +351,8 @@ begin
           BothCoupled, CoupledTogether:
           MmoRexData.Lines.Add('Error:' + Response);
       End;
-      FreeAndNilDuplexChannel(LocalDuplex);
-      FreeAndNilDuplexChannel(LocalDuplex2);
+      FreeAndNilDuplexChannel(Pointer(LocalDuplex));
+      FreeAndNilDuplexChannel(Pointer(LocalDuplex2));
       LocalDuplex := TISIndyTCPFullDuplexClient.StartAccess(FCurSrvAddress,
         FCurSrvListeningPort, ClientConnectedReturn);
       if FSendVideoChnl <> nil then
@@ -354,11 +388,11 @@ begin
         End;
         Application.ProcessMessages;
         FreeAndNil(FRxVideoChnl); // it was forced to unlinked
-        FreeAndNilDuplexChannel(LocalDuplex2);
-        FreeAndNilDuplexChannel(LocalDuplex);
+        FreeAndNilDuplexChannel(Pointer(LocalDuplex2));
+        FreeAndNilDuplexChannel(Pointer(LocalDuplex));
       end;
     finally
-      FreeAndNilDuplexChannel(LocalDuplex);
+      FreeAndNilDuplexChannel(Pointer(LocalDuplex));
       LocalClient.Free;
     end;
   finally
@@ -374,6 +408,7 @@ Var
   MeterBit: AnsiString;
 {$ENDIF}
 begin
+  Client:=nil;
   try
     BusyStart;
     MmoStartTest('Echo Test');
@@ -434,19 +469,19 @@ begin
     FCurSrvConnectionString := 'LocalHost:' + IntToStr(CListeningPort);
     FCurSrvAddress := 'LocalHost';
     FCurSrvListeningPort := CListeningPort;
-    BtnFollowOn.Enabled:=true;
-    BtnOffThreadFree.Enabled:=true;
-    BtnChkLinkState.Enabled:=true;
+    BtnFollowOn.Enabled := true;
+    BtnOffThreadFree.Enabled := true;
+    BtnChkLinkState.Enabled := true;
   End
   Else
   Begin
     CmbxExtnalServerSel.Clear;
     CmbxExtnalServerSel.Items.AddStrings(fKnownServers);
     AlignCurServerToComboBox;
-    CmbxExtnalServerSel.Visible := True;
-    BtnFollowOn.Enabled:=false;
-    BtnOffThreadFree.Enabled:=false;
-    BtnChkLinkState.Enabled:=false;
+    CmbxExtnalServerSel.Visible := true;
+    BtnFollowOn.Enabled := False;
+    BtnOffThreadFree.Enabled := False;
+    BtnChkLinkState.Enabled := False;
   End;
 end;
 
@@ -522,7 +557,7 @@ begin
       FSecondaryComsServer.OnSessionSimpleRemoteAction :=
         OnSimpleActionRxOnServer;
       FSecondaryComsServer.DefaultPort := CListeningPort + 10;
-      FSecondaryComsServer.Active := True;
+      FSecondaryComsServer.Active := true;
     end;
 
     Client := TISIndyTCPFullDuplexClient.StartAccess(FCurSrvAddress,
@@ -549,7 +584,7 @@ begin
       sleep(5000);
 
 {$IFNDEF  SuppressIPMetering}
-      Client.TimeStampMetering := True;
+      Client.TimeStampMetering := true;
 {$ENDIF}
       S := #13#10#13#10 + Client.ServerDetails;
 {$IFNDEF  SuppressIPMetering}
@@ -650,6 +685,7 @@ Var
   Loopcount: integer;
 begin
   try
+    ClientForOfflineFree:=nil;
     BusyStart;
     MmoStartTest('Test Off Thread Free');
     RstList := TStringList.Create;
@@ -692,18 +728,20 @@ begin
       ClientForOfflineFree.ServerConnections(RstList, '');
       MmoInfo.Lines.Add(crlf + RstList.Text);
       Application.ProcessMessages;
-
-      Loopcount := 20;
-      while Loopcount > 1 do
-      Begin
-        Dec(Loopcount);
+      // switching form while loop to for loop
+      // Loopcount := 20;
+      // while Loopcount > 1 do
+      // Begin
+      // Dec(Loopcount);
+      For Loopcount := 1 to 20 do
+      begin
         sleep(500);
         ClientForOfflineFree.ServerConnections(RstList, '');
         MmoInfo.Lines.Add(crlf + RstList.Text);
         Application.ProcessMessages;
       End;
     finally
-      FreeAndNilDuplexChannel(ClientForOfflineFree);
+      FreeAndNilDuplexChannel(Pointer(ClientForOfflineFree));
       FreeAndNil(RstList);
     end;
     Application.ProcessMessages;
@@ -758,7 +796,7 @@ begin
     End;
 
 {$IFNDEF  SuppressIPMetering}
-    FFwdTst.TimeStampMetering := True;
+    FFwdTst.TimeStampMetering := true;
 {$ENDIF}
     MmoRexData.Lines.Add('');
     MmoRexData.Lines.Add('State of Wait Messages');
@@ -872,7 +910,6 @@ procedure TServerForm.BtnSrvDetailsClick(Sender: TObject);
 Var
   ConnectList: TStringList;
   WillWait: TISIndyTCPClient;
-  ObjectTypeString: string;
 begin
   try
     BusyStart;
@@ -905,6 +942,8 @@ begin
       MmoRexData.Lines.Add(#13#10'Connections Advertised');
       MmoRexData.Lines.AddStrings(ConnectList);
       MmoRexData.Lines.Add('End Current Connections>>'#13#10);
+      MmoRexData.CaretPos := Point(0, MmoRexData.Lines.Count-1);
+      //MmoRexData.selstart := MaxInt;
     finally
       WillWait.Free;
       ConnectList.Free;
@@ -951,7 +990,7 @@ procedure TServerForm.BtnTestAutoCloseAndHoldClick(Sender: TObject);
       Begin
         NoWaitRegStrg := 'NoWaitRtnThread Hold ' +
           FormatDateTime('nnsszzz', now);
-        NoWaitRtnThread.PermHold := True;
+        NoWaitRtnThread.PermHold := true;
         FSaveAllOldSessions.AddObject(NoWaitRegStrg, NoWaitRtnThread); // no 0
       End
       else
@@ -966,7 +1005,7 @@ procedure TServerForm.BtnTestAutoCloseAndHoldClick(Sender: TObject);
         CListeningPort);
       Duplex.OnAnsiStringAction := OnAnsiStringClientRx;
       Duplex.OnDestroy := ClosingFormObject;
-      Duplex.SynchronizeResults := True;
+      Duplex.SynchronizeResults := true;
       RegStrg := 'Duplex No Hold' + FormatDateTime('nnsszzz', now);
       FSaveAllOldSessions.AddObject(RegStrg, Duplex); // no 2
       Duplex.ServerConnections(nil, RegStrg);
@@ -977,15 +1016,15 @@ procedure TServerForm.BtnTestAutoCloseAndHoldClick(Sender: TObject);
       Client.ServerConnections(nil, RegStrg);
       Duplex := TISIndyTCPFullDuplexClient.StartAccess(FCurSrvAddress,
         CListeningPort);
-      Duplex.PermHold := True;
+      Duplex.PermHold := true;
       Duplex.OnAnsiStringAction := OnAnsiStringClientRx;
       Duplex.OnDestroy := ClosingFormObject;
-      Duplex.SynchronizeResults := True;
+      Duplex.SynchronizeResults := true;
       RegStrg := 'Duplex Hold' + FormatDateTime('nnsszzz', now);
       FSaveAllOldSessions.AddObject(RegStrg, Duplex); // no 4
       Duplex.ServerConnections(nil, RegStrg);
 {$IFNDEF  SuppressIPMetering}
-      NoWaitRtnThread.ThreadTimeStampMetering := True;
+      NoWaitRtnThread.ThreadTimeStampMetering := true;
 {$ENDIF}
       NoWaitRtnThread.ServerConnectionsNoWait(nil, NoWaitRegStrg,
         NoWaitTCPReturn); // return always synchronised
@@ -1004,7 +1043,7 @@ procedure TServerForm.BtnTestAutoCloseAndHoldClick(Sender: TObject);
         CListeningPort);
       Duplex.OnAnsiStringAction := OnAnsiStringClientRx;
       Duplex.OnDestroy := ClosingFormObject;
-      Duplex.SynchronizeResults := True;
+      Duplex.SynchronizeResults := true;
       RegStrg := 'Duplex No Hold' + FormatDateTime('nnsszzz', now);
       FSaveAllOldSessions.AddObject(RegStrg, Duplex);
       Duplex.ServerSetRefConnection(RegStrg);
@@ -1018,18 +1057,16 @@ procedure TServerForm.BtnTestAutoCloseAndHoldClick(Sender: TObject);
 {$IFNDEF  SuppressIPMetering}
 { sub } procedure AddAMeteringChannel;
   Var
-    RegStrg, NoWaitRegStrg: string;
-    Client: TISIndyTCPClient;
-    Duplex: TISIndyTCPFullDuplexClient;
+    NoWaitRegStrg: string;
     NoWaiMeteredThread: TNoWaitReturnThread;
   begin
     Try
       NoWaiMeteredThread := TNoWaitReturnThread.Create(FCurSrvAddress,
         FCurSrvListeningPort, NoWaitClosing);
       NoWaitRegStrg := 'Metering' + FormatDateTime('nnsszzz', now);
-      NoWaiMeteredThread.PermHold := True;
+      NoWaiMeteredThread.PermHold := true;
       FSaveAllOldSessions.AddObject(NoWaitRegStrg, NoWaiMeteredThread);
-      NoWaiMeteredThread.ThreadTimeStampMetering := True;
+      NoWaiMeteredThread.ThreadTimeStampMetering := true;
       NoWaiMeteredThread.ServerConnectionsNoWait(nil, NoWaitRegStrg,
         NoWaitTCPReturn); // return always synchronised
     Except
@@ -1044,7 +1081,8 @@ begin
     BusyStart;
     MmoStartTest('Test SetUp, Hold, Advertise and AutoClose');
     if FSaveAllOldSessions = nil then
-      FSaveAllOldSessions := TStringList.Create(False);
+      FSaveAllOldSessions := TStringList.Create;
+    FSaveAllOldSessions.OwnsObjects := False;
     // Cannot own objects as some are NoWaitThreads
     // Not Sorted
 {$IFNDEF  SuppressIPMetering}
@@ -1052,7 +1090,7 @@ begin
 {$ENDIF}
     AddASeries;
     // AddOneDuplex;
-    BtnTestConnectAndRespond.Enabled := True;
+    BtnTestConnectAndRespond.Enabled := true;
   finally
     BusyEnd;
   end;
@@ -1097,7 +1135,7 @@ begin
             ' and Looped on Linked Chnl FSendMessageback' +
             FormatDateTime(' ddd hh:nn:ss.zzz', now);
 {$IFNDEF  SuppressIPMetering}
-          FFwdTst.TimeStampMetering := True;
+          FFwdTst.TimeStampMetering := true;
           AddSetMeteredTimeRecAsString(FwdRsp, 'MsgFwd');
           // FFwdTst.TimeStampMetering := True Would Add Metering but with First record = MC ;
 {$ENDIF}
@@ -1130,7 +1168,7 @@ begin
           // FormatDateTime('ddd hh:nn:ss.zz', now), 5);
         End
         else
-          FreeAndNilDuplexChannel(FSendMessageback);
+          FreeAndNilDuplexChannel(Pointer(FSendMessageback));
       end;
     except
       On E: exception do
@@ -1189,8 +1227,37 @@ end;
 
 procedure TServerForm.BusyStart;
 begin
-  PnlBusy.Visible := True;
+  PnlBusy.Visible := true;
   Application.ProcessMessages;
+end;
+
+procedure TServerForm.CheckExistingConnections;
+{ Sub } Function ClearClient(AClt: TISIndyTCPFullDuplexClient): Boolean;
+  Begin
+    Result := true;
+    if AClt = nil then
+      Exit;
+    if (AClt.Port <> FCurSrvListeningPort) or (AClt.Address <> FCurSrvAddress)
+    then
+      FreeAndNilDuplexChannel(AClt)
+    else
+      Result := False;
+  end;
+{ Sub } Procedure ResetThread(Var ATrd: TNoWaitReturnThread);
+  Begin
+    if ATrd = nil then
+      Exit;
+    ATrd.SetData(FCurSrvAddress, FCurSrvListeningPort);
+  End;
+
+begin
+  if ClearClient(FRxVideoChnl) then
+    FRxVideoChnl := Nil;
+  if ClearClient(FSendVideoChnl) then
+    FSendVideoChnl := Nil;
+  if ClearClient(FSendMessageback) then
+    FSendMessageback := Nil;
+  ResetThread(FNoWaitCntrlChl);
 end;
 
 procedure TServerForm.ChkBxLoggingClick(Sender: TObject);
@@ -1309,6 +1376,7 @@ end;
 
 function TServerForm.CommsServer: TIsIndyApplicationServer;
 begin
+  Result := nil;
   if FFormInDestroy then
     Exit;
   If FCommsServer = nil then
@@ -1324,21 +1392,21 @@ end;
 
 procedure TServerForm.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
 Var
-  Stats:String;
+  Stats: String;
 begin
   try
     BusyStart;
-    Stats:=TSingletonObjTimeSpanRecording.SingletonLifeTimeStats;
+    Stats := TSingletonObjTimeSpanRecording.SingletonLifeTimeStats;
 
     ISIndyUtilsException(self, #13#10'FormCloseQuery#'#13#10);
     ISIndyUtilsException(self, Stats);
     ISIndyUtilsException(self, 'FormCloseQuery#'#13#10);
-    Sleep(1000);
+    sleep(1000);
     FreeAllResourcesBeforeClose;
 {$IFDEF TestFastMM}
     TObject.Create;
-{$Endif}
-    CanClose := True;
+{$ENDIF}
+    CanClose := true;
   finally
     BusyEnd;
   end;
@@ -1368,7 +1436,7 @@ begin
 {$ELSE}
   LblEdtMeteredSleep.Text := 'No gblMeterSleep';
 {$ENDIF}
-  OpenAppLogging(True, '', GblLogAllChlOpenClose, GlobalTCPLogAllData,
+  OpenAppLogging(true, '', GblLogAllChlOpenClose, GlobalTCPLogAllData,
     GblLogPollActions, GblRptRegConnectiononSrvr,
     GblRptIsCommsConnectionAttempts);
   { Procedure OpenAppLogging(AStartNewLogFile:Boolean; ALogFileName: String = '';
@@ -1421,7 +1489,7 @@ begin
     begin
       if FCommsServer.DefaultPort < 1 then
         FCommsServer.DefaultPort := CListeningPort;
-      FCommsServer.Active := True;
+      FCommsServer.Active := true;
     end;
     if Not FileExists(TestFileName) then
       CreateTestFile;
@@ -1436,10 +1504,10 @@ end;
 procedure TServerForm.FormDestroy(Sender: TObject);
 begin
   Try
-  if not FFormInDestroy then
-    FreeAllResourcesBeforeClose;
-  // Should already happened in close query so
-  // Form exists until resources are cleared
+    if not FFormInDestroy then
+      FreeAllResourcesBeforeClose;
+    // Should already happened in close query so
+    // Form exists until resources are cleared
   finally
     TSingletonObjTimeSpanRecording.ReleaseSingletonTimeStats;
   End;
@@ -1451,40 +1519,51 @@ var
 begin
   Try
     Try
-      FFormInDestroy := True;
+      FFormInDestroy := true;
       FreeAndNil(FSendMessageback);
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose # FreeAndNil(FSendMessageback)');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose # FreeAndNil(FSendMessageback)');
       FreeAndNil(fKnownServers);
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose # FreeAndNil(fKnownServers)');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose # FreeAndNil(fKnownServers)');
       ClearOldSessions;
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose # ClearOldSessions');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose # ClearOldSessions');
       if FNoWaitCntrlChl <> nil then
         FNoWaitCntrlChl.Terminate;
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose #  FNoWaitCntrlChl.Terminate');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose #  FNoWaitCntrlChl.Terminate');
       FreeAndNil(FImageManager); // Release calls before server
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose # Nil(FImageManager)');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose # Nil(FImageManager)');
       sleep(1000); // allow time to process no wait rtn terminate
       ISIndyUtilsException(self, 'sleep(1000);');
       // Application.ProcessMessages; // before closing server
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose # FreeAndNil(FWaitSync)');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose # FreeAndNil(FWaitSync)');
       FreeAndNil(FWaitSync);
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose # FreeAndNil(FWaitSync)');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose # FreeAndNil(FWaitSync)');
       FreeAndNil(FTestServer);
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose #  FreeAndNil(FTestServer)');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose #  FreeAndNil(FTestServer)');
       FreeAndNil(FCommsServer);
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose # FreeAndNil(FCommsServer)');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose # FreeAndNil(FCommsServer)');
       FreeAndNil(FSecondaryComsServer);
-      ISIndyUtilsException(self, 'FreeAllResourcesBeforeClose # FreeAndNil(FSecondaryComsServer)');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose # FreeAndNil(FSecondaryComsServer)');
       GblIndyComsObjectFinalize; // Bring Forward Fo Fast MM
     Except
       On E: exception do
         ISIndyUtilsException(self, E, '#FreeAllResourcesBeforeClose Frees')
     End;
-    LogAfterFinalize := TLogFile.Create(ExceptionLogName, True, 5000000,
-      True, False);
+    LogAfterFinalize := TLogFile.Create(ExceptionLogName, true, 5000000,
+      true, False);
     try
       LogAfterFinalize.LogALine
-        (#13#10#13#10'#VCL Form FreeAllResourcesBeforeClose#'#13#10 + TSingletonObjTimeSpanRecording.SingletonLifeTimeStats);
+        (#13#10#13#10'#VCL Form FreeAllResourcesBeforeClose#'#13#10 +
+        TSingletonObjTimeSpanRecording.SingletonLifeTimeStats);
       LogAfterFinalize.LogALine('#VCL Form FreeAllResourcesBeforeClose End#');
     finally
       FreeAndNil(LogAfterFinalize);
@@ -1492,15 +1571,15 @@ begin
   except
     On E: exception do
       try
-       if LogAfterFinalize=nil then
-         LogAfterFinalize := TLogFile.Create(ExceptionLogName, True, 5000000,
-         True, False);
-       if LogAfterFinalize<>nil then
+        if LogAfterFinalize = nil then
+          LogAfterFinalize := TLogFile.Create(ExceptionLogName, true, 5000000,
+            true, False);
+        if LogAfterFinalize <> nil then
         Begin
-        LogAfterFinalize := TLogFile.Create(ExceptionLogName, True, 5000000,
-          True, False);
-        LogAfterFinalize.LogALine
-          (#13#10#13#10'VCL Form Destroy Exception#'#13#10 + E.Message);
+          LogAfterFinalize := TLogFile.Create(ExceptionLogName, true, 5000000,
+            true, False);
+          LogAfterFinalize.LogALine
+            (#13#10#13#10'VCL Form Destroy Exception#'#13#10 + E.Message);
         End;
         TSingletonObjTimeSpanRecording.ReleaseSingletonTimeStats;
       finally
@@ -1583,7 +1662,7 @@ begin
   if fKnownServers = nil then
   begin
     fKnownServers := TStringList.Create;
-    fKnownServers.OwnsObjects := True;
+    fKnownServers.OwnsObjects := true;
     fKnownServers.CaseSensitive := False;
   end
   else
@@ -1737,7 +1816,7 @@ end;
 
 procedure TServerForm.OnLinkAnyDefaultCameras(ATcp: TISIndyTCPClient);
 Var
-  LinkObj: TVideoChnlLinkVCL;
+  // LinkObj: TVideoChnlLinkVCL;
   S: string;
   Idx: integer;
   i: integer;
@@ -1755,7 +1834,8 @@ begin
           SetLength(S, i - 1);
           i := Pos(CCameraLink, S);
           if i > 0 then
-            LinkObj := ImageManager.ConnectChannel(S, FCurSrvAddress,
+            // LinkObj :=
+            ImageManager.ConnectChannel(S, FCurSrvAddress,
               FCurSrvListeningPort);
         end;
       end;
@@ -1960,7 +2040,7 @@ begin
     if not Assigned(LocalCopy.OnDestroy) then
     Begin
       LocalCopy.OnInComingGraphic := HandleInComingGraphicOnVideoRx;
-      LocalCopy.SynchronizeResults := True;
+      LocalCopy.SynchronizeResults := true;
       LocalCopy.OnDestroy := ClosingFormObject;
     End;
 
@@ -2014,7 +2094,7 @@ begin
       ISIndyUtilsException(self, 'Assigning FSendVideoChnl.OnAnsiStringAction')
     end;
 
-  LocalCopy.PermHold := True;
+  LocalCopy.PermHold := true;
   LocalCopy.OnDestroy := ClosingFormObject;
   If not LocalCopy.ServerSetRefConnection(cVideoChlId) then
     Raise exception.Create(cVideoChlId + ' not Registered');
@@ -2044,7 +2124,7 @@ begin
     if Not Assigned(LocalCopy.OnDestroy) then
     begin
       LocalCopy.OnInComingGraphic := HandleInComingGraphicOnVideoRx;
-      LocalCopy.SynchronizeResults := True;
+      LocalCopy.SynchronizeResults := true;
       LocalCopy.OnDestroy := ClosingFormObject;
       LocalCopy.OnAnsiStringAction := OnAnsiStringClientRx;
     end;
@@ -2079,7 +2159,7 @@ begin
         ISIndyUtilsException(self, E, 'Log File Read Fail');
     end;
   if ExceptLog <> nil then
-    ExceptLog.RollAndFlagNewApplication(True);
+    ExceptLog.RollAndFlagNewApplication(true);
 end;
 
 procedure TServerForm.TimerCleanupTimer(Sender: TObject);
@@ -2100,8 +2180,12 @@ begin
         FImageManager.DisConnectInactiveImageChannels(2);
       end;
 
-      ISIndyUtilsException(self, '#TimerCleanupTimer ::' +
-        FormatDateTime('dd hh:nn:ss.zzz', now));
+      if GblLogPollActions then
+        If FNextCleanupTimer < now then
+        Begin
+          FNextCleanupTimer := now + 1 / 24 / 12;
+          ISIndyUtilsException(self, '#TimerCleanupTimer');
+        End;
 
       if FRxText <> '' then
       Begin
@@ -2127,7 +2211,7 @@ begin
 {$ENDIF}
     End;
   Finally
-    TimerCleanup.Enabled := True;
+    TimerCleanup.Enabled := true;
   End;
 end;
 
@@ -2159,8 +2243,12 @@ begin
       MmoInfo.Lines.Add('Comms Objects');
       MmoInfo.Lines.Add(TGblRptComs.ReportObjectTypes);
 
-      ISIndyUtilsException(self, '#TimerStatusTimer ::' +
-        FormatDateTime('dd hh:nn:ss.zzz', now));
+      If FNextStatusTimer < now then
+      Begin
+        FNextStatusTimer := now + 1 / 24 / 4;
+        ISIndyUtilsException(self, 'TimerStatusTimer # ::' +
+          FormatDateTime('dd mmmm hh:nn:ss.zzz', now));
+      End;
       if FRxText <> '' then
       Begin
         MmoInfo.Lines.Add('');
@@ -2185,12 +2273,13 @@ begin
 {$ENDIF}
     End;
   Finally
-    TimerStatus.Enabled := True;
+    TimerStatus.Enabled := true;
   End;
 end;
 
 function TServerForm.WaitSync: TCriticalSection;
 begin
+  Result := Nil;
   if FFormInDestroy then
     Exit;
   if FWaitSync = nil then

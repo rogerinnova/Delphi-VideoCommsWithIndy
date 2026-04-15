@@ -1,9 +1,9 @@
+{$I InnovaLibDefsLaz.inc}
 unit IsLazarusPickup;
 
 {$IFDEF FPC}
 {$mode delphi}
 {$ELSE}
-{$I InnovaLibDefsLaz.inc}
 Only
 for Lazarus and FPC
 {$ENDIF}

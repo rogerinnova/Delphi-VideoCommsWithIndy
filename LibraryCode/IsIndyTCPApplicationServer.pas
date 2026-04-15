@@ -10,7 +10,13 @@ unit IsIndyTCPApplicationServer;
 interface
 
 uses
-{$IFDEF FPC} Copy Test SysUtils, Classes, SyncObjs,
+{$IFDEF FPC}
+  SysUtils,
+  Classes,
+  SyncObjs,
+  {#$IFNDEF  SuppressIPMetering}
+  IsLazTimeSpan,
+  {#$ENDIF}
 {$ELSE}
   System.SysUtils,
   System.Classes,
@@ -173,8 +179,16 @@ type
     Property ContextStopWatch: TStopwatch Read FContextStopWatch;
   end;
 
-  { TIsIndyApplicationServer }
+  { TServerCleanup }
+  TServerCleanup = Class(TThread)
+  Private
+    FOwner: TIdTcpServer;
+  Protected
+    Procedure Execute; Override;
+    Constructor Create(AOwner: TIdTcpServer);
+  End;
 
+  { TIsIndyApplicationServer }
   TIsIndyApplicationServer = class(TIdTcpServer)
   Private
     FServerClosing: Boolean;
@@ -182,6 +196,7 @@ type
     fCurrentAddresses, FLogList: TStringList;
     fCurrentSessionObjects: TList;
     FDoNextCloseEvent: TDateTime;
+    FCleanupThread: TServerCleanup;
     FBusyLock: TCriticalSection;
     FListLock: TCriticalSection;
     FOnSessionSimpleRemoteAction: TComandActionAnsi;
@@ -209,6 +224,8 @@ type
     procedure SetMaxCallsperminute(AValue: Integer);
     procedure LoadServerIniData;
     Procedure CloseInactiveSessions;
+    procedure ConfirmRegisteredConnections;
+    // Decouples registered session when follow on is not rx data
     Procedure AddSession(ASession: TISIndyTCPSvrSession);
     Procedure DropSession(ASession: TISIndyTCPSvrSession);
     Procedure DropAllCurrentSessions; // On Closing server
@@ -393,6 +410,8 @@ begin
   Finally
     FListLock.Release;
   end;
+
+  ConfirmRegisteredConnections;
 
   If FDoNextCloseEvent < now then
     CloseInactiveSessions;
@@ -603,7 +622,7 @@ Var
   LocalAllocationTime, TM: TTimeSpan;
 
   // packets on channel
-  s: string;
+  // s: string;
 begin
   if FServerClosing then
     Exit;
@@ -654,6 +673,7 @@ end;
 procedure TIsIndyApplicationServer.CloseInactiveSessions;
 Var
   ThisSession: TISIndyTCPSvrSession;
+  Msg: string;
   LocalList: TList;
   Idx: Integer;
 begin
@@ -669,7 +689,24 @@ begin
           if TObject(fCurrentSessionObjects[Idx]) is TISIndyTCPSvrSession then
           Begin
             ThisSession := TISIndyTCPSvrSession(fCurrentSessionObjects[Idx]);
-            If ThisSession.IsTimedOut then
+            if (FListOfRegConnections <> nil) and
+              (ThisSession.FCoupledSession is TISIndyTCPSvrSession) then
+            begin
+              if ThisSession.IsTimedOut then
+              Begin
+                if FListOfRegConnections.IndexOfObject(ThisSession) < 0 then
+                  LocalList.Add(ThisSession);
+              end
+              else
+              begin
+                Msg := 'Label ' + FListOfRegConnections
+                  [FListOfRegConnections.IndexOfObject(ThisSession)] +
+                  ' Connection Timed Out ' + ThisSession.TextID;
+                ISIndyUtilsException(Self, Msg);
+                LocalList.Add(ThisSession);
+              end;
+            end
+            else If ThisSession.IsTimedOut then
               LocalList.Add(ThisSession);
           end;
 
@@ -696,6 +733,34 @@ begin
   End;
 end;
 
+procedure TIsIndyApplicationServer.ConfirmRegisteredConnections;
+// Decouples registered session when follow on is not rx data
+// This allows Polls from source to be returned stopping the source being declared inactive
+Var
+  i: Integer;
+  ConObj, CplObj: TISIndyTCPSvrSession;
+begin
+  if FListOfRegConnections = nil then
+    Exit;
+  for i := 0 to FListOfRegConnections.Count - 1 do
+    if FListOfRegConnections.Objects[i] is TISIndyTCPSvrSession then
+    Begin
+      ConObj := TISIndyTCPSvrSession(FListOfRegConnections.Objects[i]);
+      if (ConObj.FCoupledSession <> nil) then
+        if (ConObj.FCoupledSession is TISIndyTCPSvrSession) then
+        Begin
+          CplObj := ConObj.FCoupledSession as TISIndyTCPSvrSession;
+          if CplObj.IsTimedOut(false) then
+          Begin
+            ConObj.FCoupledSession := nil;
+            CplObj.FCoupledSession := nil;
+          end
+          else If CplObj.FCoupledSession <> ConObj then
+            ConObj.FCoupledSession := nil;
+        end;
+    end;
+end;
+
 constructor TIsIndyApplicationServer.Create(AOwner: TComponent);
 Var
   LogStart: String;
@@ -716,10 +781,12 @@ begin
     '#' + 'New IsIndyApplicationServer Max Callromas Per Min ' +
     IntToStr(MaxCallsPerMinute));
   LoadServerIniData;
+  FCleanupThread := TServerCleanup.Create(Self);
   LogStart := 'After Ini' + crlf + 'IsIndyApplicationServer Max Calls Per Min '
     + IntToStr(MaxCallsPerMinute) + crlf + 'Session Idle Timeout =' +
     fIdleTimePermitted.ToString;
   ISIndyUtilsException(Self, LogStart);
+  FCleanupThread.Resume;
 end;
 
 function TIsIndyApplicationServer.CurrentAddressDetails: String;
@@ -765,6 +832,7 @@ begin
       ISIndyUtilsException('', ServerDetailsAsText);
     Except
     End;
+    FCleanupThread.Terminate;
     DropAllCurrentSessions;
     ISIndyUtilsException(Self, 'DropAllSessions');
     fCurrentSessionObjects.Free;
@@ -1330,7 +1398,9 @@ begin
     Finally
       FListLock.Release;
     End;
-  CloseInactiveSessions;
+  ConfirmRegisteredConnections;
+  If FDoNextCloseEvent < now then
+    CloseInactiveSessions;
 end;
 
 function TIsIndyApplicationServer.RemotePortRegAsString(ARegNo,
@@ -2761,8 +2831,8 @@ begin
   else
     Exit;
 
-  ISIndyUtilsException(Self, 'Set Svr Con ' + AConnectData);
-  LogAMessage('Set Svr Con ' + AConnectData);
+  ISIndyUtilsException(Self, TextID + 'Set Svr Con ' + AConnectData);
+  LogAMessage(TextID + 'Set Svr Con ' + AConnectData);
 
   if FCoupledSession <> nil then
     DropCoupledSession;
@@ -2779,8 +2849,8 @@ begin
     Address := Copy(AConnectData, Tst + 3, 255);
     NewCon := Svr.GetRegConnectionFor(Address);
     if NewCon <> nil then
-      ISIndyUtilsException(Self, 'Set Svr Con ' + AConnectData +
-        ' Connected to ' + NewCon.Address + ':' + IntToStr(NewCon.Port));
+      ISIndyUtilsException(Self, 'Set Svr Con ' + AConnectData + #13#10 + TextID
+        + ' Connected to ' + NewCon.Address + ':' + IntToStr(NewCon.Port));
 
     // LogAMessage('Set Svr Con ' + AConnectData + ' Connected to ' +
     // NewCon.Address + ':' + IntToStr(NewCon.Port));
@@ -3020,7 +3090,7 @@ begin
   Result := FIpStr + ' Total Calls =' + IntToStr(FTotalCalls) + crlf +
     '(80) Count Now =' + IntToStr(FCountTo80) + crlf + 'Last Call =' +
     FLastCall.Subtract(TM).ToString + crlf + '80 not Before =' +
-    FAllowTo80.Subtract(TM) + crlf;
+    FAllowTo80.Subtract(TM).ToString + crlf;
 end;
 
 { TIsMonitorTCPAppServer.TTstThrd }
@@ -3106,6 +3176,37 @@ begin
     Result := FTestThread.FLastStatus
   else
     Result := 0.0;
+end;
+
+{ TServerCleanup }
+
+constructor TServerCleanup.Create(AOwner: TIdTcpServer);
+begin
+  FOwner := AOwner;
+  FreeOnTerminate := True;
+  inherited Create(True);
+end;
+
+procedure TServerCleanup.Execute;
+Var
+  Srv: TIsIndyApplicationServer;
+begin
+  if FOwner is TIsIndyApplicationServer then
+    Srv := TIsIndyApplicationServer(FOwner)
+  Else
+    Exit;
+  while Not Terminated do
+    Try
+      Sleep(30000); // 30 seconds
+      if Terminated then
+        Exit;
+      Srv.ConfirmRegisteredConnections;
+      If Srv.FDoNextCloseEvent < now then
+        Srv.CloseInactiveSessions;
+    Except
+      On E: Exception do
+        ISIndyUtilsException(Self, E, 'Execute');
+    End;
 end;
 
 end.

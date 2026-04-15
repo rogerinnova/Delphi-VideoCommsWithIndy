@@ -14,7 +14,7 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
   Top = 240
   DesignerMasterStyle = 0
   object BtnEcho: TButton
-    Position.X = 153.000000000000000000
+    Position.X = 137.000000000000000000
     Position.Y = 129.000000000000000000
     Size.Width = 80.000000000000000000
     Size.Height = 29.000000000000000000
@@ -27,7 +27,7 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     EnableOpenDialog = False
     Position.X = 8.000000000000000000
     Position.Y = 8.000000000000000000
-    Size.Width = 137.000000000000000000
+    Size.Width = 121.000000000000000000
     Size.Height = 153.000000000000000000
     Size.PlatformDefault = False
     TabOrder = 2
@@ -51,7 +51,6 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     Size.Height = 16.000000000000000000
     Size.PlatformDefault = False
     Text = 'LblImagesSent'
-    TabOrder = 23
   end
   object Timer1: TTimer
     OnTimer = Timer1Timer
@@ -60,7 +59,7 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
   end
   object BtnReset: TButton
     StyledSettings = [FontColor]
-    Position.X = 153.000000000000000000
+    Position.X = 137.000000000000000000
     Position.Y = 8.000000000000000000
     Size.Width = 80.000000000000000000
     Size.Height = 32.000000000000000000
@@ -95,7 +94,6 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     Size.Height = 25.000000000000000000
     Size.PlatformDefault = False
     Text = 'LblCamera'
-    TabOrder = 25
   end
   object CmbxServerSel: TComboBox
     Anchors = [akLeft, akTop, akRight]
@@ -105,6 +103,7 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     Size.Height = 30.000000000000000000
     Size.PlatformDefault = False
     TabOrder = 13
+    OnChange = CmbxServerSelChange
   end
   object EdtServerUrl: TEdit
     Touch.InteractiveGestures = [LongTap, DoubleTap]
@@ -138,7 +137,7 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     OnClick = BtnLinkStatusClick
   end
   object BtnLoadLog: TButton
-    Position.X = 153.000000000000000000
+    Position.X = 137.000000000000000000
     Position.Y = 89.000000000000000000
     Size.Width = 80.000000000000000000
     Size.Height = 32.000000000000000000
@@ -150,6 +149,7 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
   object MMoLogData: TMemo
     Touch.InteractiveGestures = [Pan, LongTap, DoubleTap]
     DataDetectorTypes = []
+    TextSettings.WordWrap = True
     Align = Client
     Size.Width = 509.000000000000000000
     Size.Height = 480.000000000000000000
@@ -160,7 +160,7 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     Viewport.Height = 476.000000000000000000
   end
   object BtnCloseLog: TButton
-    Position.X = 258.000000000000000000
+    Position.X = 226.000000000000000000
     Position.Y = 8.000000000000000000
     Size.Width = 80.000000000000000000
     Size.Height = 32.000000000000000000
@@ -170,10 +170,23 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     OnClick = BtnCloseLogClick
   end
   object BtnStopVideo: TButton
-    Position.X = 256.000000000000000000
-    Position.Y = 96.000000000000000000
+    Position.X = 232.000000000000000000
+    Position.Y = 88.000000000000000000
+    Size.Width = 80.000000000000000000
+    Size.Height = 33.000000000000000000
+    Size.PlatformDefault = False
     TabOrder = 24
     Text = 'BtnStopVideo'
     OnClick = BtnStopVideoClick
+  end
+  object BtnAllLogsToServer: TButton
+    Position.X = 104.000000000000000000
+    Position.Y = 376.000000000000000000
+    Size.Width = 177.000000000000000000
+    Size.Height = 33.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 27
+    Text = 'BtnAllLogsToServer'
+    OnClick = BtnAllLogsToServerClick
   end
 end
