@@ -39,16 +39,18 @@ Const
 {$ENDIF}
 
 Var
-  cLogAll: Boolean = false;
-  // LogAll: TCheckBox;
+  GblLogMsgToGeneralLogl: Boolean = false;
+  // Put any messages logged to server in the general log LogAll: TCheckBox;
   GLogISIndyUtilsException: Boolean = false;
+  //Put any ISIndyUtilsException references in LogFile
   GblLogAllChlOpenClose: Boolean = false;
+  //Record TCP Channel open and close events
   // LogCO: TCheckBox;
   GlobalTCPLogAllData: Boolean = false;
   // LogTD: TCheckBox;
   GblLogPollActions: Boolean = false;
   // LogPA: TCheckBox;
-  GblRptIsCommsConnectionAttempts: Boolean = false;
+  GblRptSrvrRelayConnectionAttempts: Boolean = false;
   GblRptIsCommsCheckAutoChannels: Boolean = false;
   GblRptRegConnectiononSrvr: Boolean = false;
   // LogRc: TCheckBox;
@@ -56,6 +58,11 @@ Var
   // LogMC: TCheckBox;
   GblRptTimeoutClear: Boolean = false;
   // LogCl: TCheckBox;
+  GblRptMediaErrors: Boolean = false;
+  //  unit IsMobileCaptureDevices;
+  GblRptSendImages: Boolean = false;
+  //  unit IsMobileCaptureDevices;
+
 
 implementation
 
@@ -94,7 +101,8 @@ end;
 Function ReportLoggingStatus: string;
 begin
   Result := '';
-  If cLogAll then
+
+  If GblLogMsgToGeneralLogl then
     Result := Result + ' Log All ??' + #13#10
   else
     Result := Result + ' not log all' + #13#10;
@@ -108,10 +116,12 @@ begin
     Result := Result + ' Log Channels Open and Close' + #13#10
   else
     Result := Result + ' Channels Open and Close not logged' + #13#10;
+
   if GlobalTCPLogAllData then
     Result := Result + ' Log TCP Data' + #13#10
   else
     Result := Result + ' TCP Data not logged' + #13#10;
+
   if GblLogPollActions then
     Result := Result + ' Log Poll Actions' + #13#10
   else
@@ -121,10 +131,12 @@ begin
     Result := Result + ' Log Reg Srv Connections' + #13#10
   else
     Result := Result + ' Reg Srv Connections not logged' + #13#10;
+
   if GblRptMakeConnectionOnSrvr then
     Result := Result + ' Log Srv Connections' + #13#10
   else
     Result := Result + ' Srv Connections not logged' + #13#10;
+
   if GblRptTimeoutClear then
     Result := Result + ' Log TimeOuts' + #13#10
   else
@@ -215,9 +227,9 @@ Begin
   if Key = '' then
     Exit
   Else if Key = 'LA' then
-    cLogAll := True
+    GblLogMsgToGeneralLogl := True
   Else if Key = 'la' then
-    cLogAll := false;
+    GblLogMsgToGeneralLogl := false;
   Result := ReportLoggingStatus;
 End;
 

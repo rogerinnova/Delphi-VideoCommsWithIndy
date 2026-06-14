@@ -4,10 +4,10 @@ program ConsoleAppDemoService;
 {$R *.res}
 
 uses
-  {$IFDEF TestFastMM}
+{$IFDEF TestFastMM}
   FastMM5 in 'Z:\ThirdPartyGitRepo\FastMM\FastMM5-master\FastMM5.pas',
   ISFastMMInit in '..\IsLibrayExtracts\ISFastMMInit.pas',
-  {$EndIf }
+{$ENDIF }
   System.SysUtils,
   IniFiles,
   isGeneralLib,
@@ -40,7 +40,18 @@ Var
 class function TAppObj.AppObj: TAppObj;
 begin
   if ThisApp = nil then
+  Begin
+    // For demo Sevice also  TDemoTCPBasicServer.ServiceCreate
+    OpenAppLogging(true, '');
+    // GblRptSendImages := false;
+    GblRptMakeConnectionOnSrvr := true;
+    GblLogAllChlOpenClose := true;
+    GblRptTimeoutClear := true;
+    GLogISIndyUtilsException := true;
+    GblRptRegConnectiononSrvr := true;
+    // For demo Sevice also  TDemoTCPBasicServer.ServiceCreate
     ThisApp := TAppObj.Create;
+  end;
   Result := ThisApp;
 end;
 
@@ -88,18 +99,19 @@ Var
   IniFile: TIniFile;
   BaseDir: String;
   LogPurge: TLogFile;
-  TimeSpan:TTimeSpan;
-  Kill:integer;
-//  BObj:Tobject;
-begin
-  {$IFDEF TestFastMM}
-  LoadFastMMfromISLib;
-  {$Else}
-   ReportMemoryLeaksOnShutdown := true;
-  {$EndIf}
+  TimeSpan: TTimeSpan;
+  Kill: integer;
 
-  Kill:=500;
-//  BObj:=Tobject.Create;
+  // BObj:Tobject;
+begin
+{$IFDEF TestFastMM}
+  LoadFastMMfromISLib;
+{$ELSE}
+  ReportMemoryLeaksOnShutdown := true;
+{$ENDIF}
+  Kill := 500;
+
+  // BObj:=Tobject.Create;
   try
     LogPurge := nil;
     Try
@@ -112,7 +124,6 @@ begin
     Except
     End;
 
-    OpenAppLogging(True, '', True, True, false, false, false);
     if Not FileExists(IniFileNameFromExe) then
       Try
         BaseDir := ExtractFileDir(IniFileNameFromExe) + '\Data';
@@ -129,17 +140,15 @@ begin
             IniFileNameFromExe + ' Error=' + E.Message);
       End;
     Try
-      GLogISIndyUtilsException := True;
       TAppObj.AppObj.CommsServer;
-{$IFDEF Debug}
-      GLogISIndyUtilsException := True;
-{$ENDIF}
       if TAppObj.AppObj.FCommsServer.DefaultPort < 1 then
         TAppObj.AppObj.FCommsServer.DefaultPort := CServiceListeningPort;
-      TAppObj.AppObj.FCommsServer.Active := True;
-      ISIndyUtilsException(TAppObj.AppObj,'#Server default port ='+IntToStr(TAppObj.AppObj.FCommsServer.DefaultPort));
-      ISIndyUtilsException(TAppObj.AppObj,TAppObj.AppObj.FCommsServer.ServerDetailsAsText);
-      Except
+      TAppObj.AppObj.FCommsServer.Active := true;
+      ISIndyUtilsException(TAppObj.AppObj, '#Server default port =' +
+        IntToStr(TAppObj.AppObj.FCommsServer.DefaultPort));
+      ISIndyUtilsException(TAppObj.AppObj,
+        TAppObj.AppObj.FCommsServer.ServerDetailsAsText);
+    Except
       On E: Exception do
       Begin
         ISIndyUtilsException('Console', E, 'Failed Commserver Start');
@@ -147,7 +156,7 @@ begin
           E.Message);
       End;
     End;
-    while (Kill>0)and TAppObj.AppObj.FCommsServer.Active do
+    while (Kill > 0) and TAppObj.AppObj.FCommsServer.Active do
     Begin
       Writeln(TAppObj.AppObj.FCommsServer.ServerDetailsAsText);
       Writeln(TAppObj.AppObj.FCommsServer.ReadLogMessage);
@@ -156,12 +165,12 @@ begin
       Writeln(' ');
       Writeln(TAppObj.AppObj.FCommsServer.LinkStatusAsResponse(cIsLinkedOnServer
         + TAppObj.AppObj.FCommsServer.RemotePortRegAsString(0, 3), nil));
-      TimeSpan:=TTimeSpan.FromMilliseconds(20000*Kill);
-      Writeln('Will Close in '+TimeSpan.ToString);
+      TimeSpan := TTimeSpan.FromMilliseconds(20000 * Kill);
+      Writeln('Will Close in ' + TimeSpan.ToString);
       sleep(20000);
       Dec(Kill);
-      TimeSpan:=TTimeSpan.FromMilliseconds(20000*Kill);
-      Writeln('Will Close in '+TimeSpan.ToString);
+      TimeSpan := TTimeSpan.FromMilliseconds(20000 * Kill);
+      Writeln('Will Close in ' + TimeSpan.ToString);
     End;
     FreeAndNil(ThisApp);
   except

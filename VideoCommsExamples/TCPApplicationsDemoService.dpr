@@ -2,7 +2,7 @@ program TCPApplicationsDemoService;
 
 uses
   Vcl.SvcMgr,
-  SrvcFormBasicTCPServer in 'Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\SrvcFormBasicTCPServer.pas' {DemoTCPBasicServer: TService};
+  SrvcFormBasicTCPServer in 'SrvcFormBasicTCPServer.pas' {DemoTCPBasicServer: TService};
 
 {$R *.RES}
 

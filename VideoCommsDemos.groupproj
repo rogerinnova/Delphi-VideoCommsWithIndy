@@ -21,7 +21,7 @@
         <Projects Include="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\Junk Project\ProjectDoTimestamp.dproj">
             <Dependencies/>
         </Projects>
-        <Projects Include="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj">
+        <Projects Include="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\MultiPlatDev\MobileDeviceComms\FmxSendTestGenerator\PrototypeWindowsOnlySendTest.dproj">
             <Dependencies/>
         </Projects>
         <Projects Include="VideoCommsExamples\VCLApplicationSrver.dproj">
@@ -31,6 +31,9 @@
             <Dependencies/>
         </Projects>
         <Projects Include="VideoCommsExamples\TCPApplicationsDemoService.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj">
             <Dependencies/>
         </Projects>
     </ItemGroup>
@@ -95,14 +98,14 @@
     <Target Name="ProjectDoTimestamp:Make">
         <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\ADUGDemo\TempAdugDemoComms\Junk Project\ProjectDoTimestamp.dproj" Targets="Make"/>
     </Target>
-    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr">
-        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj"/>
+    <Target Name="PrototypeWindowsOnlySendTest">
+        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\MultiPlatDev\MobileDeviceComms\FmxSendTestGenerator\PrototypeWindowsOnlySendTest.dproj"/>
     </Target>
-    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr:Clean">
-        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj" Targets="Clean"/>
+    <Target Name="PrototypeWindowsOnlySendTest:Clean">
+        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\MultiPlatDev\MobileDeviceComms\FmxSendTestGenerator\PrototypeWindowsOnlySendTest.dproj" Targets="Clean"/>
     </Target>
-    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr:Make">
-        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj" Targets="Make"/>
+    <Target Name="PrototypeWindowsOnlySendTest:Make">
+        <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\MultiPlatDev\MobileDeviceComms\FmxSendTestGenerator\PrototypeWindowsOnlySendTest.dproj" Targets="Make"/>
     </Target>
     <Target Name="VCLApplicationSrver">
         <MSBuild Projects="VideoCommsExamples\VCLApplicationSrver.dproj"/>
@@ -131,14 +134,23 @@
     <Target Name="TCPApplicationsDemoService:Make">
         <MSBuild Projects="VideoCommsExamples\TCPApplicationsDemoService.dproj" Targets="Make"/>
     </Target>
+    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr">
+        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj"/>
+    </Target>
+    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr:Clean">
+        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr:Make">
+        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="VclImageDemo;FMXImageDemo;TCPClientDemoApp;FMXDummyImagesForAppSrvr;FMXD11DummyImagesForAppSrvr;ProjectDoTimestamp;PrototypeWindowsOnlyDummyImagesForAppSrvr;VCLApplicationSrver;ConsoleAppDemoService;TCPApplicationsDemoService"/>
+        <CallTarget Targets="VclImageDemo;FMXImageDemo;TCPClientDemoApp;FMXDummyImagesForAppSrvr;FMXD11DummyImagesForAppSrvr;ProjectDoTimestamp;PrototypeWindowsOnlySendTest;VCLApplicationSrver;ConsoleAppDemoService;TCPApplicationsDemoService;PrototypeWindowsOnlyDummyImagesForAppSrvr"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="VclImageDemo:Clean;FMXImageDemo:Clean;TCPClientDemoApp:Clean;FMXDummyImagesForAppSrvr:Clean;FMXD11DummyImagesForAppSrvr:Clean;ProjectDoTimestamp:Clean;PrototypeWindowsOnlyDummyImagesForAppSrvr:Clean;VCLApplicationSrver:Clean;ConsoleAppDemoService:Clean;TCPApplicationsDemoService:Clean"/>
+        <CallTarget Targets="VclImageDemo:Clean;FMXImageDemo:Clean;TCPClientDemoApp:Clean;FMXDummyImagesForAppSrvr:Clean;FMXD11DummyImagesForAppSrvr:Clean;ProjectDoTimestamp:Clean;PrototypeWindowsOnlySendTest:Clean;VCLApplicationSrver:Clean;ConsoleAppDemoService:Clean;TCPApplicationsDemoService:Clean;PrototypeWindowsOnlyDummyImagesForAppSrvr:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="VclImageDemo:Make;FMXImageDemo:Make;TCPClientDemoApp:Make;FMXDummyImagesForAppSrvr:Make;FMXD11DummyImagesForAppSrvr:Make;ProjectDoTimestamp:Make;PrototypeWindowsOnlyDummyImagesForAppSrvr:Make;VCLApplicationSrver:Make;ConsoleAppDemoService:Make;TCPApplicationsDemoService:Make"/>
+        <CallTarget Targets="VclImageDemo:Make;FMXImageDemo:Make;TCPClientDemoApp:Make;FMXDummyImagesForAppSrvr:Make;FMXD11DummyImagesForAppSrvr:Make;ProjectDoTimestamp:Make;PrototypeWindowsOnlySendTest:Make;VCLApplicationSrver:Make;ConsoleAppDemoService:Make;TCPApplicationsDemoService:Make;PrototypeWindowsOnlyDummyImagesForAppSrvr:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

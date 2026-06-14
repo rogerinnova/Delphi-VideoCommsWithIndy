@@ -81,6 +81,10 @@ type
     BtnExternalServer: TButton;
     CmbxExtnalServerSel: TComboBox;
     TimerCleanup: TTimer;
+    EdtServerFileDirectory: TEdit;
+    LblFileDirectory: TLabel;
+    BtnAvailableSrvrFiles: TButton;
+    BtnGetThisFile: TButton;
     procedure FormDestroy(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
@@ -103,6 +107,8 @@ type
     procedure LblEdtMeteredSleepChange(Sender: TObject);
     procedure BtnExternalServerClick(Sender: TObject);
     procedure CmbxExtnalServerSelExitEnter(Sender: TObject);
+    procedure BtnAvailableSrvrFilesClick(Sender: TObject);
+    procedure BtnGetThisFileClick(Sender: TObject);
   private
     { Private declarations }
     FFormInDestroy: Boolean;
@@ -156,6 +162,7 @@ type
     Procedure SetupVideoRxForStaticImage(AConnectObj: TObject);
     Procedure SendMockCameraImage(AConnectObj: TObject);
     Procedure HandleInComingGraphicOnVideoRx(AGraphic: TGraphic);
+    Procedure CloseRxVideoChannel;
     Procedure ClosingFormObject(Sender: TObject);
     Procedure NoWaitClosing(Sender: TObject);
     Procedure NoWaitTCPReturn(ARtn: TISIndyTCPClient);
@@ -197,7 +204,7 @@ Var
   Port, Idx: integer;
   Clt: TISIndyTCPClient;
 begin
-  Clt:=nil;
+  Clt := nil;
   try
     if fKnownServers = nil then
       LoadIniDetails;
@@ -261,6 +268,33 @@ begin
   End;
 end;
 
+procedure TServerForm.BtnAvailableSrvrFilesClick(Sender: TObject);
+Var
+  LocalClient: TISIndyTCPClient;
+
+begin
+  LocalClient := nil;
+  try
+    MmoRexData.Lines.Add('Files on Server');
+    MmoRexData.Lines.Add('Directory ' + EdtServerFileDirectory.Text);
+    BusyStart;
+    Try
+      LocalClient := TISIndyTCPClient.StartAccess(FCurSrvAddress,
+        FCurSrvListeningPort, nil);
+      if LocalClient <> nil then
+        MmoRexData.Lines.Add(LocalClient.ServerFilesAvailable
+          (EdtServerFileDirectory.Text))
+    Finally
+      LocalClient.Free;
+    End;
+  Except
+    On E: exception do
+      MmoRexData.Lines.Add(E.Message);
+  End;
+  BusyEnd;
+  MmoRexData.Lines.Add('Directory End');
+end;
+
 procedure TServerForm.BtnChkLinkStateClick(Sender: TObject);
 Var
   LocalClient: TISIndyTCPClient;
@@ -271,7 +305,7 @@ begin
     BusyStart;
     MmoStartTest('Check Lnk State Test');
     LocalDuplex := nil;
-//    LocalDuplex2 := nil;
+    // LocalDuplex2 := nil;
     LocalClient := TISIndyTCPClient.StartAccess(FCurSrvAddress,
       FCurSrvListeningPort, ClientConnectedReturn);
     try
@@ -408,7 +442,7 @@ Var
   MeterBit: AnsiString;
 {$ENDIF}
 begin
-  Client:=nil;
+  Client := nil;
   try
     BusyStart;
     MmoStartTest('Echo Test');
@@ -483,6 +517,7 @@ begin
     BtnOffThreadFree.Enabled := False;
     BtnChkLinkState.Enabled := False;
   End;
+  CheckExistingConnections;
 end;
 
 procedure TServerForm.BtnStartStopMonitorClick(Sender: TObject);
@@ -517,7 +552,7 @@ begin
 
     if FRxVideoChnl <> nil then
       if Not FRxVideoChnl.Active then
-        FreeAndNil(FRxVideoChnl);
+        CloseRxVideoChannel;
 
     if FRxVideoChnl <> nil then // but is active
       if not FRxVideoChnl.ChannelActiveWithGraphic(30) then
@@ -670,6 +705,49 @@ begin
   end;
 end;
 
+procedure TServerForm.BtnGetThisFileClick(Sender: TObject);
+Var
+  LocalClient: TISIndyTCPClient;
+  Sz: integer;
+  FileRecovered: TMemoryStream;
+  Trans, ServerFileName: AnsiString;
+begin
+  LocalClient := nil;
+  ServerFileName := EdtServerFileDirectory.Text;
+  BusyStart;
+  try
+    Try
+      LocalClient := TISIndyTCPClient.StartAccess(FCurSrvAddress,
+        FCurSrvListeningPort, nil);
+      if LocalClient <> nil then
+      Begin
+        Trans := LocalClient.SimpleActionExtTransaction(cRemoteFileSize + '^' +
+          ServerFileName);
+        Sz := StrToIntDef(Trans, 0);
+        if Sz > 20000 then
+          raise exception.Create('File ' + ServerFileName + ' is too big');
+        If Sz < 1 then
+          raise exception.Create('File ' + ServerFileName + ' does not exist');
+        FileRecovered := TMemoryStream.Create;
+        Try
+          LocalClient.CopyLargeServerFileToStream(FileRecovered,
+            ServerFileName);
+          if FileRecovered.Size > 1 then
+            MmoRexData.Lines.Text := LocalClient.StreamAsString(FileRecovered);
+        Finally
+          FileRecovered.Free;
+        end;
+      End;
+    Finally
+      LocalClient.Free;
+    End;
+  Except
+    On E: exception do
+      MmoRexData.Lines.Add(E.Message);
+  End;
+  BusyEnd;
+end;
+
 procedure TServerForm.BtnOffThreadFreeClick(Sender: TObject);
 { Start up a number of Clients the call offline free
   Offline free returns immediatly
@@ -685,7 +763,7 @@ Var
   Loopcount: integer;
 begin
   try
-    ClientForOfflineFree:=nil;
+    ClientForOfflineFree := nil;
     BusyStart;
     MmoStartTest('Test Off Thread Free');
     RstList := TStringList.Create;
@@ -942,8 +1020,8 @@ begin
       MmoRexData.Lines.Add(#13#10'Connections Advertised');
       MmoRexData.Lines.AddStrings(ConnectList);
       MmoRexData.Lines.Add('End Current Connections>>'#13#10);
-      MmoRexData.CaretPos := Point(0, MmoRexData.Lines.Count-1);
-      //MmoRexData.selstart := MaxInt;
+      MmoRexData.CaretPos := Point(0, MmoRexData.Lines.Count - 1);
+      // MmoRexData.selstart := MaxInt;
     finally
       WillWait.Free;
       ConnectList.Free;
@@ -986,7 +1064,7 @@ procedure TServerForm.BtnTestAutoCloseAndHoldClick(Sender: TObject);
       NoWaitRtnThread := TNoWaitReturnThread.Create(FCurSrvAddress,
         FCurSrvListeningPort, NoWaitClosing);
       NoWaitRegStrg := 'NoWaitRtnThread' + FormatDateTime('nnsszzz', now);
-      if FSaveAllOldSessions.count > 1 then
+      if FSaveAllOldSessions.Count > 1 then
       Begin
         NoWaitRegStrg := 'NoWaitRtnThread Hold ' +
           FormatDateTime('nnsszzz', now);
@@ -1006,7 +1084,13 @@ procedure TServerForm.BtnTestAutoCloseAndHoldClick(Sender: TObject);
       Duplex.OnAnsiStringAction := OnAnsiStringClientRx;
       Duplex.OnDestroy := ClosingFormObject;
       Duplex.SynchronizeResults := true;
+      // to find no hold
       RegStrg := 'Duplex No Hold' + FormatDateTime('nnsszzz', now);
+      if GlobalSelectDebugChn = nil then
+      Begin
+        GlobalSelectDebugChn := Duplex;
+        GlobalDbugRegisteredAs := RegStrg;
+      End;
       FSaveAllOldSessions.AddObject(RegStrg, Duplex); // no 2
       Duplex.ServerConnections(nil, RegStrg);
       Client := TISIndyTCPClient.StartAccess(FCurSrvAddress, CListeningPort);
@@ -1107,7 +1191,7 @@ begin
     MmoStartTest('Test Connect to Advertised and Confirm Data Connection');
     if FSaveAllOldSessions = nil then
       Exit;
-    if FSaveAllOldSessions.count < 5 then
+    if FSaveAllOldSessions.Count < 5 then
       Exit;
 
     Try
@@ -1179,7 +1263,7 @@ begin
       MmoRexData.Lines.Add('Test Client Reactivate');
       MmoRexData.Lines.Add('');
       Clt := nil;
-      If FSaveAllOldSessions.count > 3 then
+      If FSaveAllOldSessions.Count > 3 then
         if Pos('Client', FSaveAllOldSessions[1]) > 0 then
           if FSaveAllOldSessions.Objects[1] is TISIndyTCPClient then
           begin // test client still valid but disconnected
@@ -1263,12 +1347,12 @@ end;
 procedure TServerForm.ChkBxLoggingClick(Sender: TObject);
 // Direct Set Logging Constants from CheckBoxes
 begin
-  cLogAll := ChkBxLogAll.Checked;
+  GblLogMsgToGeneralLogl := ChkBxLogAll.Checked;
   GLogISIndyUtilsException := ChkBxLogAllEx.Checked;
   GblLogAllChlOpenClose := ChkBxLogCO.Checked;
   GlobalTCPLogAllData := ChkBxLogTD.Checked;
   GblLogPollActions := ChkBxLogPA.Checked;
-  GblRptIsCommsConnectionAttempts := ChkBxLogCA.Checked;
+  GblRptSrvrRelayConnectionAttempts := ChkBxLogCA.Checked;
   GblRptIsCommsCheckAutoChannels := ChkBxLogAC.Checked;
   GblRptRegConnectiononSrvr := ChkBxLogRc.Checked;
   GblRptMakeConnectionOnSrvr := ChkBxLogMC.Checked;
@@ -1296,7 +1380,7 @@ begin
           ISIndyUtilsException(self, E, 'ClearOldSessions Part 1');
       End;
       if FSaveAllOldSessions <> nil then
-        for i := 0 to FSaveAllOldSessions.count - 1 do
+        for i := 0 to FSaveAllOldSessions.Count - 1 do
           Try
             // Cannot own objects as some are TNoWaitReturnThreads
             if FSaveAllOldSessions.Objects[i] <> nil then
@@ -1324,6 +1408,28 @@ begin
     MmoInfo.Lines.Add('Connection Made ' + TISIndyTCPClient(Sender).TextID)
   Else
     MmoInfo.Lines.Add('UnExpected Call to ClientConnectedReturn');
+end;
+
+procedure TServerForm.CloseRxVideoChannel;
+Var
+  LImgCtrl: TImageControl;
+begin
+  Try
+    FreeAndNil(FRxVideoChnl);
+    if FImageManager <> nil then
+      LImgCtrl := FImageManager.ImageControl(0)
+    else
+      LImgCtrl := nil;
+
+    if LImgCtrl <> nil then
+    Begin
+      LImgCtrl.Visible := False;
+      LImgCtrl.BitMap := nil;
+    End;
+  Except
+    On E: exception do
+      ISIndyUtilsException(self, E, 'CloseRxVideoChannel')
+  end;
 end;
 
 procedure TServerForm.ClosingFormObject(Sender: TObject);
@@ -1436,36 +1542,24 @@ begin
 {$ELSE}
   LblEdtMeteredSleep.Text := 'No gblMeterSleep';
 {$ENDIF}
+  // GblRptSendImages := false;
+  GblLogAllChlOpenClose := true;
+  GblRptTimeoutClear := true;
+  GLogISIndyUtilsException := true;
+  // OpenAppLogging in Delay if FMX
   OpenAppLogging(true, '', GblLogAllChlOpenClose, GlobalTCPLogAllData,
     GblLogPollActions, GblRptRegConnectiononSrvr,
-    GblRptIsCommsConnectionAttempts);
-  { Procedure OpenAppLogging(AStartNewLogFile:Boolean; ALogFileName: String = '';
-    ARptTcpOpenClose: Boolean = false;
-    ARptTcpData: Boolean = false;
-    ARptCommsPoll: Boolean = false;
-    ARptAutoChannels: Boolean = false;
-    ARptCommsConAttempts: Boolean = false);
-    cLogAll := ChkBxLogAll.Checked;
-    GLogISIndyUtilsException := ChkBxLogAllEx.Checked;
-    GblLogAllChlOpenClose := ChkBxLogCO.Checked;
-    GlobalTCPLogAllData := ChkBxLogTD.Checked;
-    GblLogPollActions := ChkBxLogPA.Checked;
-    GblRptIsCommsConnectionAttempts := ChkBxLogCA.Checked;
-    GblRptIsCommsCheckAutoChannels := ChkBxLogAC.Checked;
-    GblRptRegConnectiononSrvr := ChkBxLogRc.Checked;
-    GblRptMakeConnectionOnSrvr := ChkBxLogMC.Checked;
-    GblRptSrvrTimeoutClear := ChkBxLogCl.Checked;
-  }
-  ChkBxLoggingClick(nil); // Direct Set Logging
-  // GblLogAllChlOpenClose := True;
-  TGblRptComs.ReportObjectTypes; // Start Counting
+    GblRptSrvrRelayConnectionAttempts);
 
-  MmoInfo.Clear;
+  ChkBxLoggingClick(nil); // Direct Set Logging to Chkboxes
+
+  TGblRptComs.ReportObjectTypes; // Start Counting
   if Not FileExists(IniFileNameFromExe) then
     Try
       BaseDir := ExtractFileDir(IniFileNameFromExe) + '\Data';
       IniFile := TIniFile.Create(IniFileNameFromExe);
       try // Create Ini File For Server Code
+        IniFile.WriteString('Files', 'FileAccessBase', BaseDir);
         IniFile.WriteString('Files', 'FileAccessBase', BaseDir);
         IniFile.WriteInteger('TCP', 'PORT', CListeningPort);
       finally
@@ -1476,6 +1570,8 @@ begin
         raise exception.Create('Failed to find/create inifile ' +
           IniFileNameFromExe + ' Error=' + E.Message);
     End;
+
+  MmoInfo.Clear;
   Try
     if FCommsServer = nil then
     begin
@@ -1590,19 +1686,24 @@ end;
 
 procedure TServerForm.HandleInComingGraphicOnVideoRx(AGraphic: TGraphic);
 Var
-  ImgRx: TImageControl;
+  LImgRx: TImageControl;
 begin
-  if ImageManager = nil then
-    ISIndyUtilsException(self,
-      'HandleInComingGraphicOnVideoRx#>>No Image manager Created');
-  if FImageManager = nil then
-    Exit;
-  ImgRx := FImageManager.ImageControl(0); // Fixed Images = 1
-  // ImgRx.Stretch := True;
-  // ImgRx.Proportional := True;
-  // FImageSetUp := True;
-  if AGraphic <> nil then
-    ImgRx.Picture.Graphic := AGraphic;
+  try
+    if ImageManager = nil then
+      ISIndyUtilsException(self,
+        'HandleInComingGraphicOnVideoRx#>>No Image manager Created');
+    if FImageManager = nil then
+      Exit;
+    LImgRx := FImageManager.ImageControl(0); // Fixed Images = 1
+    LImgRx.BitMap := AGraphic;
+    if AGraphic = nil then
+      LImgRx.Visible := False
+    Else
+      LImgRx.Visible := true;
+  Except
+    On E: exception do
+      ISIndyUtilsException(self, E, 'HandleInComingGraphicOnVideoRx')
+  end;
 end;
 
 function TServerForm.ImageManager: TImageMngrVCL;
@@ -1646,7 +1747,7 @@ begin
       OnLinkAnyDefaultCameras);
   Except
     On E: exception do
-      ISIndyUtilsException(self, E, 'LinkAnyDefaultCamerasLaunch');
+      ISIndyUtilsException(self, E, '#LinkAnyDefaultCamerasLaunch');
   End;
 
 end;
@@ -1681,7 +1782,7 @@ begin
   Finally
     IniFile.Free;
   End;
-  if fKnownServers.count < 1 then
+  if fKnownServers.Count < 1 then
   begin
     fKnownServers.Add('scripts.innovasolutions.com.au:1559'); // PORT=1559
     fKnownServers.Add('192.168.1.92:1559');
@@ -1825,7 +1926,7 @@ begin
     if IsNotMainThread then
       ISIndyUtilsException(self, 'OnLinkAnyDefaultCameras not synced')
     else
-      for Idx := 0 to MmoRegistrations.Lines.count - 1 do
+      for Idx := 0 to MmoRegistrations.Lines.Count - 1 do
       begin
         S := MmoRegistrations.Lines[Idx];
         i := Pos('|Free', S);
@@ -2012,7 +2113,7 @@ begin
       end;
     End;
     if fKnownServers <> nil then
-      for i := 0 to fKnownServers.count - 1 do
+      for i := 0 to fKnownServers.Count - 1 do
         IniFile.WriteString('Servers', 'Svr' + IntToStr(i + 1),
           fKnownServers[i]);
   Finally
@@ -2047,7 +2148,9 @@ begin
     if FSendVideoChnl <> nil then
     begin
       PkData := TVideoComsChannel.PackGraphic(ImgSend.Picture.Graphic);
-      FSendVideoChnl.FullDuplexDispatch(PkData, '');
+      FSendVideoChnl.FullDuplexDispatchNoWait(PkData, 1);
+      FSendVideoChnl.FullDuplexDispatchNoWait(PkData, 1);
+      FSendVideoChnl.FullDuplexDispatchNoWait(PkData, -1);
     end;
   end;
 end;
@@ -2070,7 +2173,7 @@ begin
     if FSendVideoChnl = nil then
       FSendVideoChnl := TVideoComsChannel.StartAccess(FCurSrvAddress,
         FCurSrvListeningPort, SetupVideoPathAndAdvertise);
-
+    FSendVideoChnl.PermHold := true;
     Rslt := TStringList.Create;
     try
       FSendVideoChnl.ServerConnections(Rslt, '');
@@ -2171,44 +2274,59 @@ begin
         Exit;
 
       LinkAnyDefaultCamerasLaunch;
-      if FSendVideoChnl <> nil then
-        SendMockCameraImage(FSendVideoChnl);
 
-      if FImageManager <> nil then
-      begin
-        FImageManager.BlankInactiveImageChannels(1);
-        FImageManager.DisConnectInactiveImageChannels(2);
+      Try
+        if FSendVideoChnl <> nil then
+          if FRxVideoChnl = nil then
+            BtnStartVideoCommsClick(nil)
+          else
+            SendMockCameraImage(FSendVideoChnl);
+      Except
+        On E: exception do
+          ISIndyUtilsException(self, E, '#TimerCleanupTimer SendVideoChnl');
       end;
 
-      if GblLogPollActions then
-        If FNextCleanupTimer < now then
+      if FImageManager <> nil then
+        try
+          FImageManager.BlankInactiveImageChannels(1);
+          FImageManager.DisConnectInactiveImageChannels(2);
+        Except
+          On E: exception do
+            ISIndyUtilsException(self, E, '#TimerCleanupTimer 1');
+        end;
+
+      try
+        if GblLogPollActions then
+          If FNextCleanupTimer < now then
+          Begin
+            FNextCleanupTimer := now + 1 / 24 / 12;
+            ISIndyUtilsException(self, '#TimerCleanupTimer');
+          End;
+
+        if FRxText <> '' then
         Begin
-          FNextCleanupTimer := now + 1 / 24 / 12;
-          ISIndyUtilsException(self, '#TimerCleanupTimer');
+          MmoInfo.Lines.Add('');
+          MmoInfo.Lines.Add('Server Side RX Data');
+
+          { Incoming data from TCP sessions act in their own thread unless"SynchronizeResults is set.
+            Without"SynchronizeResults thread safety requires interactions to be managed. }
+
+          WaitSync.Acquire;
+          Try
+            MmoInfo.Lines.Add(FRxText);
+            FRxText := '';
+          Finally
+            FWaitSync.Release;
+          End;
+          MmoInfo.Lines.Add('End Server Side RX Data');
         End;
-
-      if FRxText <> '' then
-      Begin
-        MmoInfo.Lines.Add('');
-        MmoInfo.Lines.Add('Server Side RX Data');
-
-        { Incoming data from TCP sessions act in their own thread unless"SynchronizeResults is set.
-          Without"SynchronizeResults thread safety requires interactions to be managed. }
-
-        WaitSync.Acquire;
-        Try
-          MmoInfo.Lines.Add(FRxText);
-          FRxText := '';
-        Finally
-          FWaitSync.Release;
-        End;
-        MmoInfo.Lines.Add('End Server Side RX Data');
-      End;
+      Except
+        On E: exception do
+          ISIndyUtilsException(self, E, '#TimerCleanupTimer 2');
+      end;
     Except
-{$IFDEF MSWindows}
       On E: exception do
-        OutputDebugString(PChar('LogFile Exception::' + E.Message));
-{$ENDIF}
+        ISIndyUtilsException(self, E, '#TimerCleanupTimer outer loop');
     End;
   Finally
     TimerCleanup.Enabled := true;

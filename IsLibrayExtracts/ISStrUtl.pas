@@ -685,7 +685,16 @@ function MailToUrl(Eto, Ecc, Ebcc, Subject, Body: AnsiString): AnsiString;
 function ExtractDomainFromEmail(const AEmailAddress: AnsiString): AnsiString;
 
 // Representing Byte Data
-function BytesToTextString(const ByteData: AnsiString): AnsiString;
+function BytesToTextString(const ByteData: ansistring;
+  Const AMaxLenth: integer = 50): ansistring; overload;
+// Potentially Three Lines
+// ABC123<>!    Above 127 ^A^B^C^1^2^3^<^>^!
+// (^A)(^B)(^C) Above 127 ^(^A)^(^B)^(^C)
+// [8E][9F][
+// See also BufferAsAnsi,  StringFromBuffer and BytesToTextString in IsRemoteConnectionIndyTcpObjs
+
+// Old Code
+//function BytesToTextString(const ByteData: AnsiString): AnsiString; Overload;
 // [Hex] unless (^m} Control Char or a LETTER or a L!E!T!T!E!R! above 128
 
 function ObjIntToStr(AObj: TObject): AnsiString;
@@ -6968,45 +6977,118 @@ begin
   Result := rr;
 end;
 
-function BytesToTextString(const ByteData: AnsiString): AnsiString;
+function BytesToTextString(const ByteData: ansistring;
+  Const AMaxLenth: integer = 50): ansistring; overload;
 const
-  a: set of ' ' .. '}' = [(' ') .. '~'];
+  a: set of ' ' .. '}' = [' ' .. '~'];
   Ctrl: set of #0 .. #255 = [#1 .. #31];
 var
-  i: Integer;
+  i, Len: integer;
   Sub: LongInt;
-  rr: AnsiString;
-  x: Ansichar;
-  GreaterThan127: Boolean;
-begin
-  i := 1;
-  rr := '';
-  while i <= length(ByteData) do
-  begin
-    Sub := Ord(ByteData[i]);
-    GreaterThan127 := Sub > 127;
-    if GreaterThan127 then
-      Sub := Sub - 128;
-    x := (AnsiChr(Sub));
-    if (x in a) then
-    Begin
-      rr := rr + x;
-      if GreaterThan127 then
-        rr := rr + '!';
-    End
-    else
+  rr, AllHex, AllDecVal: ansistring;
+  x: AnsiChar;
+  GreaterThan127, NeedAllHex: boolean;
+  DataLength: integer;
+Begin
+  Len := Length(ByteData);
+  if Len > AMaxLenth then
+    Len := AMaxLenth;
+  try
+    Result := '';
+    if Len < 1 then
+      Exit;
+
+    i := 1;
+    rr := '';
+    AllHex := '';
+    AllDecVal := '';
+    NeedAllHex := false;
+    DataLength := Len;
+    while i <= DataLength do
     begin
+      Sub := Ord(ByteData[i]);
+      GreaterThan127 := Sub > 127;
       if GreaterThan127 then
-        rr := rr + '[' + IntToHex(Sub + 128, 2) + ']'
+      begin
+        Sub := Sub - 128;
+        NeedAllHex := true;
+        rr := rr + '^';
+      end;
+      x := AnsiChar(Sub);
+      if (x in a) then
+        rr := rr + x
+        // ABC123<>!    Above 127 ^A^B^C^1^2^3^<^>^!
+        // (^A)(^B)(^C) Above 127 ^(^A)^(^B)^(^C)
+        // [8E][9F][
       else if (x in Ctrl) then
-        rr := rr + '(' + '^' + AnsiChr(Sub + 64) + ')'
+        rr := rr + '(' + '^' + AnsiChar(Sub + 64) + ')'
+        // (^A) Control A
+      Else if (Sub = 0) then
+        rr := rr + '(NUL)'
+      Else if (Sub = 127) then
+        rr := rr + '(DEL)'
       Else
-        rr := rr + '[' + IntToHex(Sub, 2) + ']';
+      Begin
+        rr := rr + '(?)'; // No Translation
+        NeedAllHex := true;
+      End;
+
+      if GreaterThan127 then
+        Sub := Sub + 128;
+      AllHex := AllHex + '[' + IntToHex(Sub, 2) + ']';
+      AllDecVal := AllDecVal + '{' + IntToStr(Sub) + '}';
+      Inc(i);
     end;
-    i := i + 1;
+
+    Result := rr;
+
+    if NeedAllHex then
+      Result := Result + #13#10 + AllHex + #13#10 + AllDecVal;
+  except
+    on E: Exception do
+      Result := 'BytesToTextString Error::' + E.Message;
   end;
-  Result := rr;
 end;
+//
+//function BytesToTextString(const ByteData: AnsiString): AnsiString;
+//const
+//  a: set of ' ' .. '}' = [(' ') .. '~'];
+//  Ctrl: set of #0 .. #255 = [#1 .. #31];
+//var
+//  i: Integer;
+//  Sub: LongInt;
+//  rr: AnsiString;
+//  x: Ansichar;
+//  GreaterThan127: Boolean;
+//begin
+//  i := 1;
+//  rr := '';
+//  while i <= length(ByteData) do
+//  begin
+//    Sub := Ord(ByteData[i]);
+//    GreaterThan127 := Sub > 127;
+//    if GreaterThan127 then
+//      Sub := Sub - 128;
+//    x := (AnsiChr(Sub));
+//    if (x in a) then
+//    Begin
+//      rr := rr + x;
+//      if GreaterThan127 then
+//        rr := rr + '!';
+//    End
+//    else
+//    begin
+//      if GreaterThan127 then
+//        rr := rr + '[' + IntToHex(Sub + 128, 2) + ']'
+//      else if (x in Ctrl) then
+//        rr := rr + '(' + '^' + AnsiChr(Sub + 64) + ')'
+//      Else
+//        rr := rr + '[' + IntToHex(Sub, 2) + ']';
+//    end;
+//    i := i + 1;
+//  end;
+//  Result := rr;
+//end;
 
 function ObjIntToStr(AObj: TObject): AnsiString;
 Var

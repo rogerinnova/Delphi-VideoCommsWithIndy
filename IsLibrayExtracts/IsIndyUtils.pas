@@ -58,6 +58,7 @@ Uses
   IOUtils,
 {$ENDIF}
   DateUtils,
+  IniFiles,
   IsLogging
 {$IFDEF NextGen}
     , ISObjectCounter, IsNextGenPickup
@@ -130,7 +131,7 @@ Var
 implementation
 
 uses
-  IsGblLogCheck, ISUnicodeStrUtl;
+  IsGblLogCheck, ISUnicodeStrUtl, ISGeneralLib;
 
 Const
   // Copied From ISPermObjFileStm
@@ -208,8 +209,6 @@ begin
     TIdStack.DecUsage;
   End;
 end;
-
-
 
 Function BytesToAnsiStringIS(AVal: TIdBytes): AnsiString;
 Var
@@ -443,13 +442,28 @@ Begin
 end;
 
 Function ExceptionLogName: string;
+Var
+  IniFile: TIniFile;
 begin
+  Result := '';
   If ExceptLog <> nil then
     Result := ExceptLog.FileName
-  else
+  else if FileExists(IniFileNameFromExe) then
+    Try
+      IniFile := TIniFile.Create(IniFileNameFromExe);
+      Result := IniFile.ReadString('Files', 'LogFile', '');
+      if Result = '' then
+        IniFile.WriteString('Files', 'LogFile',
+          ChangeFileExt(IniFileNameFromExe, '.log'));
+    Finally
+      IniFile.Free;
+    End;
+  if Result <> '' then
+    Exit;
+
 {$IFDEF Android}
-    Result := System.IOUtils.TPath.Combine(System.IOUtils.TPath.GetHomePath,
-      'AppExceptLog');
+  Result := System.IOUtils.TPath.Combine(System.IOUtils.TPath.GetHomePath,
+    'AppExceptLog');
   {
     Need to follow up Chester Wilson post
     https://forums.adug.org.au/t/file-access-assistance-for-android/60847
@@ -464,7 +478,7 @@ begin
   }
 
 {$ELSE}
-    Result := ChangeFileExt(AllPlatformExeFileNameFrmISProcCl, '.log');
+  Result := ChangeFileExt(AllPlatformExeFileNameFrmISProcCl, '.log');
 {$ENDIF}
 end;
 
@@ -528,7 +542,7 @@ End;
 Procedure ISIndyUtilsException(AObject: TObject; AException: Exception;
   AExMessage: String); overload;
 Begin
-  ISIndyUtilsException(AObject, AException.ClassName + '<' + AException.Message
+  ISIndyUtilsException(AObject, AException.ClassName + '< ' + AException.Message
     + '>::' + AExMessage);
 End;
 
@@ -550,7 +564,11 @@ begin
     FLock.Acquire;
     try
       if not FListOfData.Find(AObj.ClassName, Index) then
+      begin
         Index := FListOfData.AddObject(AObj.ClassName, TGblRptCount.New);
+        if GblLogAllChlOpenClose then
+          ISIndyUtilsException(AObj, '#New Object Class=' + AObj.ClassName);
+      end;
       if index > -1 then
       begin
         val := FListOfData.Objects[Index] as TGblRptCount;
@@ -612,7 +630,8 @@ Begin
     Result := #13#10 + 'Reporting IP Objects - ' +
       FormatDateTime('  dd mmm hh:nn', Now) + #13#10 + 'Total current=' +
       IntToStr(GCountOfConnections) + ' and Total Historical=' +
-      IntToStr(GCountOfHistoricalCons) + GlobalCountOfComsObjectTypes.Report;
+      IntToStr(GCountOfHistoricalCons) + #13#10'Global Count Report' +
+      GlobalCountOfComsObjectTypes.Report;
   end;
 End;
 

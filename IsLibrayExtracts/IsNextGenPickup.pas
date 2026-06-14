@@ -97,7 +97,7 @@ Type
     function UpperCase: AnsiString; // Makes a copy
     function LowerCase: AnsiString;
     Procedure UniqueString;
-    Function AsStringValues: String;
+    Function AsStringValues(Const AMaxLenth:Integer = 1000): String;
     // 123[0D](^M)5647
     Function GetLength: integer;
     Function LastChar:Integer; inline;
@@ -188,6 +188,16 @@ function LowerCase(const S: AnsiString): AnsiString; overload;
 Function StrScan(const Str: PAnsiChar; Chr: Byte): PAnsiChar; overload;
 Procedure UniqueString(Var AStg: AnsiString); overload;
 function ByteType(const S: AnsiString; Index: integer): TMbcsByteType; overload;
+
+function BytesToTextString(const ByteData: ansistring;
+  Const AMaxLenth: integer = 50): ansistring; overload;
+// Potentially Three Lines
+// ABC123<>!    Above 127 ^A^B^C^1^2^3^<^>^!
+// (^A)(^B)(^C) Above 127 ^(^A)^(^B)^(^C)
+// [8E][9F][
+// See also BufferAsAnsi,  StringFromBuffer and BytesToTextString in IsRemoteConnectionIndyTcpObjs
+
+
 Function Pos(ASubStr, AStr: AnsiString): integer; Overload;
 // Pos returns one based index for zero based and one based strings
 // Use Index of and Substring for consistent zero based values across
@@ -226,6 +236,21 @@ function ByteType(const S: AnsiString; Index: integer): TMbcsByteType; overload;
 Begin
   Result := mbSingleByte;
 End;
+
+function BytesToTextString(const ByteData: ansistring;
+  Const AMaxLenth: integer = 50): ansistring; overload;
+const
+  a: set of ' ' .. '}' = [' ' .. '~'];
+  Ctrl: set of #0 .. #255 = [#1 .. #31];
+begin
+  try
+    Result := ByteData.AsStringValues(AMaxLenth);
+  except
+    on E: Exception do
+      Result := 'BytesToTextString Error::' + E.Message;
+  end;
+end;
+
 
 Function Pos(ASubStr, AStr: AnsiString): integer;
 // Pos returns one based index for zero based and one based strings
@@ -571,7 +596,7 @@ begin
     Result := Nxt;
 end;
 
-function AnsiString.AsStringValues: String;
+function AnsiString.AsStringValues(Const AMaxLenth:Integer = 1000): String;
 // 123[0D](^M)5647
 const
   a: set of #0 .. #255 = [' ' .. '~'];
@@ -593,8 +618,8 @@ begin
     i := 0;
     rr := '';
     DataLength := Length;
-    if DataLength > 1000 then
-      DataLength := 1000;
+    if DataLength > AMaxLenth then
+      DataLength := AMaxLenth;
     while i <= DataLength - 1 do
     begin
       Sub := Ord(FData[i]);

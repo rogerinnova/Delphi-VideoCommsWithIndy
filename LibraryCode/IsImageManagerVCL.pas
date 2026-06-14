@@ -27,7 +27,7 @@ uses
   VCL.ExtCtrls,
   TimeSpan,
 {$ENDIF}
- IsMediaCommsObjs, IsRemoteConnectionIndyTcpObjs, IsArrayLib;
+  IsMediaCommsObjs, IsRemoteConnectionIndyTcpObjs, IsArrayLib;
 
 Type
   // {$IFDEF UseVCLBITMAP}
@@ -114,6 +114,7 @@ Type
     Destructor Destroy; override;
     Procedure DisConnectInactiveChannel(AInLastNoMins: Integer);
     Procedure BlankInactiveChannel(AInLastNoMins: Integer);
+    Function TextId: String;
     Function VideoComs: TVideoComsChannel;
     Function VideoIsActive(AInLastNoMins: Integer): Boolean;
     Property Image: TImageControl write SetImage;
@@ -181,7 +182,7 @@ Var
   ChnlObj: TVideoChnlLinkVCL;
   NxtImage: TImageControl;
 begin
-  Result:=nil;
+  Result := nil;
   try
     if ListOfCurrentVideoRx = nil then
       Exit;
@@ -205,9 +206,9 @@ begin
         FManagerLock.Release;
       end;
       ISIndyUtilsException(Self, '#Added Rx Video Channel ' + ALinkData +
-        '  No ' + IntToStr(FListOfCurrentVideoRx.Count));
+        '  Current Video Rx = ' + IntToStr(FListOfCurrentVideoRx.Count));
     end;
-    Result:=ChnlObj;
+    Result := ChnlObj;
     if (ChnlObj = Nil) or (ChnlObj.VideoComs = Nil) then
       ISIndyUtilsException(Self, 'Failed ConnectChannel =' + ALinkData + ' on '
         + ASrvAddress);
@@ -553,14 +554,18 @@ begin
 
   if FManagerLock.TryEnter then
     try
+      if GblLogAllChlOpenClose then
+        ISIndyUtilsException(Self, '#RemoveVideoLink ' + ALink.TextId);
       ListIdx := FListOfCurrentVideoRx.IndexOfObject(ALink);
+
       if ListIdx < 0 then
-        ISIndyUtilsException(Self, 'RemoveVideoLink Object ' + ALink.FLinkRef +
+        ISIndyUtilsException(Self, '#RemoveVideoLink Object ' + ALink.FLinkRef +
           ' not in List ')
       else
       begin
         if GblLogAllChlOpenClose then
-          ISIndyUtilsException(Self, 'RemoveVideoLink Object ' + ALink.FLinkRef);
+          ISIndyUtilsException(Self, '#RemoveVideoLink Object ' +
+            ALink.FLinkRef);
         FListOfCurrentVideoRx.Objects[ListIdx] := nil;
         FListOfCurrentVideoRx.Delete(ListIdx);
       end;
@@ -568,7 +573,7 @@ begin
       FManagerLock.Leave;
     end
   Else
-    ISIndyUtilsException(Self, 'RemoveVideoLink No Lock ' + ALink.FLinkRef);
+    ISIndyUtilsException(Self, '#RemoveVideoLink No Lock ' + ALink.FLinkRef);
 end;
 
 procedure TImageMngrVCL.SetImagePanels(AImagePnl: TPanel);
@@ -1043,16 +1048,15 @@ procedure TVideoChnlLinkVCL.LnkChnlClosing(ASender: TObject);
 begin
   if ASender = FLinkVideoComs then
     FLinkVideoComs := nil
+  Else if ASender = nil then
+    ISIndyUtilsException(Self, '#LnkChnlClosing Not FVideoComs')
   Else
-   if ASender=nil then
-     ISIndyUtilsException(Self, '#LnkChnlClosing Not FVideoComs')
-    Else
-     ISIndyUtilsException(ASender, '#LnkChnlClosing Not FVideoComs');
+    ISIndyUtilsException(ASender, '#LnkChnlClosing Not FVideoComs');
 
   if GblLogAllChlOpenClose then
     if ASender is TISIndyTCPBase then
       ISIndyUtilsException(Self, '#LnkChnlClosing >> ' +
-        TISIndyTCPBase(ASender).TextID)
+        TISIndyTCPBase(ASender).TextId)
     else
       ISIndyUtilsException(Self, '#LnkChnlClosing No Ref');
 
@@ -1092,13 +1096,13 @@ begin
     if FVideoManagerOwner <> nil then
       FVideoManagerOwner.RemoveVideoLink(Self)
     else
-      ISIndyUtilsException(Self, 'Destroy No Owner');
+      ISIndyUtilsException(Self, '#Destroy No Owner '+TextId);
     if FImage <> nil then
       FImage.Picture.Graphic := nil;
     inherited;
   Except
     On E: Exception do
-      ISIndyUtilsException(Self, E, 'Destroy');
+      ISIndyUtilsException(Self, E, 'Destroy '+TextId);
   End;
 end;
 
@@ -1134,6 +1138,10 @@ begin
               'DisConnectInactiveChannel RxGraphic 1');
         End;
       FImage := nil;
+
+      if GblRptTimeoutClear then
+         ISIndyUtilsException(self,'#Not ChannelActiveWithGraphic ::'+TextId);
+
       FLinkVideoComs.OffThreadDestroy(False);
       FLinkVideoComs := nil;
       Free;
@@ -1169,44 +1177,67 @@ end;
 
 procedure TVideoChnlLinkVCL.RxGraphic(AGraphic: TGraphic);
 Var
-  SyncWait:TTimeSpan;
+  SyncWait: TTimeSpan;
 begin
-  if FImage = nil then
-    Exit
-  else if FImage is TImageControl then
-  Begin
-    if (AGraphic = nil) then
-    begin
-      if FLinkVideoComs is TVideoComsChannel then
-        if not FLinkVideoComs.ChannelActiveWithGraphic(60) then
-          if FImage.Visible then
-            FImage.Visible := False;
-    end
-    else
+  Try
+    if FImage = nil then
+      Exit
+    else if FImage is TImageControl then
     Begin
-       if FSyncBitmap and IsNotMainThread then
+      if (AGraphic = nil) then
+      begin
+        if FLinkVideoComs is TVideoComsChannel then
+          if not FLinkVideoComs.ChannelActiveWithGraphic(60) then
+            if FImage.Visible then
+              FImage.Visible := False;
+      end
+      else
+      Begin
+        if FSyncBitmap and IsNotMainThread then
           raise Exception.Create('RxGraphic not Synced');
-      if FLinkVideoComs <> nil then
-       begin
-        FLastRxGraphicTime := FLinkVideoComs.StopWatch.Elapsed;
-        SyncWait:= FLastRxGraphicTime - FLinkVideoComs.LastRxOrAcknowledgeGraphic;
-        if SyncWait.TotalSeconds > 3 then
-          ISIndyUtilsException(Self,'RxGraphics SyncWait = '+SyncWait.ToString+
-           ' on '+ FLinkVideoComs.TextID);
-       end;
-      FActiveChnl := true;
-      FImage.Picture.Graphic := AGraphic;
-      // Bitmap is assigned >> Refcount data inc
+        if FLinkVideoComs <> nil then
+        begin
+          FLastRxGraphicTime := FLinkVideoComs.StopWatch.Elapsed;
+          SyncWait := FLastRxGraphicTime -
+            FLinkVideoComs.LastRxOrAcknowledgeGraphic;
+          if SyncWait.TotalSeconds > 3 then
+            ISIndyUtilsException(Self, 'RxGraphics SyncWait = ' +
+              SyncWait.ToString + ' on ' + FLinkVideoComs.TextId);
+        end;
+        FActiveChnl := true;
+        FImage.BitMap := AGraphic;
+        // Bitmap is assigned >> Refcount data inc
 
-      if Not FImage.Visible then
-        FImage.Visible := true;
+        if Not FImage.Visible then
+          FImage.Visible := true;
+      End;
     End;
+  Except
+    On E: Exception Do
+      ISIndyUtilsException(Self, E, '#RxGraphic');
   End;
 end;
 
 procedure TVideoChnlLinkVCL.SetImage(const Value: TImageControl);
 begin
   FImage := Value;
+end;
+
+function TVideoChnlLinkVCL.TextId: String;
+begin
+  try
+    if FLinkVideoComs <> nil then
+      Result := FLinkVideoComs.TextId
+    Else
+      Result := FHost + ':' + IntToStr(FPort);
+  Except
+    on E: Exception Do
+    Begin
+      Result := 'Error';
+      ISIndyUtilsException(Self, E, FLinkRef + '>> #TextId ' + Result)
+    End;
+  end;
+  Result := FLinkRef + ' >> ' + Result;
 end;
 
 function TVideoChnlLinkVCL.VideoComs: TVideoComsChannel;
@@ -1244,11 +1275,10 @@ begin
       AInLastNoMins := 3;
 
     If Not FLinkVideoComs.StopWatch.IsRunning then
-     Result:= false
-    else
-      if FActiveChnl then
-        Result := FLinkVideoComs.StopWatch.Elapsed < FLastRxGraphicTime.Add
-          (TTimeSpan.FromMinutes(AInLastNoMins));
+      Result := False
+    else if FActiveChnl then
+      Result := FLinkVideoComs.StopWatch.Elapsed < FLastRxGraphicTime.Add
+        (TTimeSpan.FromMinutes(AInLastNoMins));
   Except
     On E: Exception do
     begin
@@ -1267,12 +1297,12 @@ end;
 
 procedure TImageControl.SetBitMap(const Value: TGraphic);
 begin
-  if Value Is TBitmap then
-    Picture.BitMap := TBitmap(Value)
+  if Value Is TGraphic then
+    Picture.Graphic := Value
   else if Value = nil then
     Picture.BitMap := TBitmap(Value)
   else
-    raise Exception.Create('Must Provide BitMap');
+    raise Exception.Create('Must Provide TGraphic');
 end;
 
 end.

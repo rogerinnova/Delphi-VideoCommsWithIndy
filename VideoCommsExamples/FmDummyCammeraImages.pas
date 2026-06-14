@@ -7,7 +7,7 @@ interface
 
 uses
   System.SysUtils, System.Types, System.UITypes, System.Classes,
-  System.Variants, IniFiles, IsProcCl,
+  System.Variants, IniFiles, IsProcCl, System.TimeSpan,
 {$IFDEF NEXTGEN}
   IsNextGenPickup,
 {$ENDIF}
@@ -77,7 +77,7 @@ type
     Procedure ClientConnectedReturn(Sender: TObject);
 
     Procedure SentBitMapEvent(ABitMap: TBitMap; ASentImages: integer);
-    Procedure OnCameraData(ADevice: TCaptureDevice; ATime: TDateTime);
+    Procedure OnCameraData(ADevice: TCaptureDevice; ATime: TTimeSpan);
   public
     { Public declarations }
   end;
@@ -109,54 +109,56 @@ Var
   Port: integer;
 
 begin
-  If FCurSrvConnectionString = '' then Exit;
-
+  If FCurSrvConnectionString = '' then
+    Exit;
 
   If TISIndyTCPBase.ExpandSrvRefCode(FCurSrvConnectionString, Srv, Port) then
   Begin
-  ControlChn := TISIndyTCPClient.StartAccess(srv,Port,nil);
+    ControlChn := TISIndyTCPClient.StartAccess(Srv, Port, nil);
   End
-  Else ControlChn:=nil;
+  Else
+    ControlChn := nil;
 
   CanDelete := false;
-  if ControlChn<>nil then
-  Try
-    if ControlChn.Active then
-    Begin
-      OldName := ExceptionLogName;
-      CanDelete := true;
-      Sent := 0;
-      IndexFileName := 'FrmMobilPort'+IntToStr(ControlChn.LocalPort);
-
-      if CanDelete then
+  if ControlChn <> nil then
+    Try
+      if ControlChn.Active then
       Begin
-        if FindFirst(ChangeFileExt(OldName, '*.Log'), faNormal, FileRec) = 0
-        then
-          while CanDelete do
-          Begin
-            inc(Sent);
-            if Sent > 6 then
-              Exit;
-            NewName := FileRec.Name;
-            TxFile := TFileStream.Create(NewName, fmopenread + fmShareDenyNone);
-            Try
-              SrvFileName := 'Temp\' + IndexFileName + '-' +
-                FormatDateTime('dd_mmmm-hh_nn_ss.zzz', now) + '.log';
-              CanDelete := ControlChn.PutLargeStreamToServer(TxFile,
-                SrvFileName);
-              if CanDelete then
-                DeleteFile(NewName);
-              CanDelete := FindNext(FileRec) = 0;
-            Finally
-              TxFile.Free;
+        OldName := ExceptionLogName;
+        CanDelete := true;
+        Sent := 0;
+        IndexFileName := 'FrmMobilPort' + IntToStr(ControlChn.LocalPort);
+
+        if CanDelete then
+        Begin
+          if FindFirst(ChangeFileExt(OldName, '*.Log'), faNormal, FileRec) = 0
+          then
+            while CanDelete do
+            Begin
+              inc(Sent);
+              if Sent > 6 then
+                Exit;
+              NewName := FileRec.Name;
+              TxFile := TFileStream.Create(NewName,
+                fmopenread + fmShareDenyNone);
+              Try
+                SrvFileName := 'Temp\' + IndexFileName + '-' +
+                  FormatDateTime('dd_mmmm-hh_nn_ss.zzz', now) + '.log';
+                CanDelete := ControlChn.PutLargeStreamToServer(TxFile,
+                  SrvFileName);
+                if CanDelete then
+                  DeleteFile(NewName);
+                CanDelete := FindNext(FileRec) = 0;
+              Finally
+                TxFile.Free;
+              End;
             End;
-          End;
-        FindClose(FileRec);
+          FindClose(FileRec);
+        End;
       End;
+    Finally
+      ControlChn.Free;
     End;
-  Finally
-    ControlChn.Free;
-  End;
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.BtnAllLogsToServerClick
@@ -376,8 +378,6 @@ end;
 procedure TFmDummyCamerraForTestingSrvr.DelayedSetup;
 // Delay some create concepts to allow for Android
 Var
-  // IniFile: TIniFile;
-  // BaseDir: String;
   LogPurge: TLogFile;
 begin
   Try
@@ -394,13 +394,16 @@ begin
       End;
     Except
     End;
-    // moved to LoadLog
-    // OpenAppLogging(True, '', False{GblLogAllChlOpenClose},False{GlobalTCPLogAllData},
-    // False{GblLogPollActions},False{GblRptRegConnectiononSrvr},
-    // False{GblRptIsCommsConnectionAttempts});
     TGblRptComs.ReportObjectTypes; // Start Counting
     EdtServerUrl.Text := 'scripts.innovasolutions.com.au:1777'; // For testing
     UpdateConnections;
+    GLogISIndyUtilsException := true;
+    if ExceptLog = nil then
+      OpenAppLogging(true, '', GblLogAllChlOpenClose,
+        GlobalTCPLogAllData,
+        GblLogPollActions, GblRptRegConnectiononSrvr,
+        GblRptSrvrRelayConnectionAttempts);
+    ISIndyUtilsException(self, 'DelayedSetup');
     FDelayFormCreateActions := true;
   Except
     On E: exception do
@@ -412,7 +415,11 @@ procedure TFmDummyCamerraForTestingSrvr.FormCreate(Sender: TObject);
 var
   LogPurge: TLogFile;
 begin
-  GblRptSendImages := true;
+  GblRptSendImages := false;
+  GblLogAllChlOpenClose := true;
+  GblRptTimeoutClear := true;
+  GLogISIndyUtilsException := true;
+  // OpenAppLogging in Delay if FMX
   LogPurge := nil;
   Try
     Try
@@ -423,9 +430,6 @@ begin
     End;
   Except
   End;
-  // OpenAppLogging(True, '', GblLogAllChlOpenClose, GlobalTCPLogAllData,
-  // GblLogPollActions, GblRptRegConnectiononSrvr,
-  // GblRptIsCommsConnectionAttempts);
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.FormDestroy(Sender: TObject);
@@ -473,6 +477,7 @@ begin
     fKnownServers.Add('scripts.innovasolutions.com.au:1559'); // PORT=1559
     fKnownServers.Add('192.168.1.92:1559');
     fKnownServers.Add('192.168.1.95:1559');
+    fKnownServers.Add('192.168.1.96:1559');
     fKnownServers.Add('192.168.1.94:1559');
     SaveIniDetails;
   end;
@@ -501,7 +506,7 @@ begin
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.OnCameraData(ADevice: TCaptureDevice;
-  ATime: TDateTime);
+  ATime: TTimeSpan);
 begin
   inc(FCameraImages);
   // Returns are synced at create
@@ -639,17 +644,8 @@ begin
           ISIndyUtilsException(self, E, 'Log File Read Fail');
       end;
 
-{$IFNDEF NextGen}
-    // Temp Problem
-    if ExceptLog = nil then
-      OpenAppLogging(true, '', false { GblLogAllChlOpenClose } ,
-        false { GlobalTCPLogAllData } , false { GblLogPollActions } ,
-        false { GblRptRegConnectiononSrvr } ,
-        false { GblRptIsCommsConnectionAttempts } );
-
     if ExceptLog <> nil then
       ExceptLog.RollAndFlagNewApplication(true);
-{$ENDIF}
   Except
     On E: exception do
       ISIndyUtilsException(self, E, 'Log File Outer loop');
@@ -739,7 +735,9 @@ begin
     if FConnectionToServer <> nil then
       if not FConnectionToServer.Active then
       Begin
-        // FConnectionToServer.CloseGracefully;
+        if GblLogAllChlOpenClose then
+          ISIndyUtilsException(Self,
+            '#TFmDummyCamerraForTestingSrvr.Timer1Timer Free Channel::' + FConnectionToServer.TextID);
         FreeAndNilDuplexChannel(FConnectionToServer);
       end;
     if FConnectionToServer = nil then

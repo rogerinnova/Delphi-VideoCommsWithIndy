@@ -37,7 +37,7 @@ type
     FLastLoggedRepeat: Integer;
     FLastLoggedTime: TDateTime;
     FLastLoggedHour: string;
-    FIngoreLogTime: Boolean;
+    FIngoreLogRollTimeCheck: Boolean;
     function AssciiOnly(s: string): AnsiString;
     function IsAssciiOnly(s: string): Boolean;
     procedure LogHourlyChange;
@@ -65,7 +65,7 @@ type
     property PurgeLogFilesOlderThan: TDateTime read FPurgeLogFilesOlderThan
       write SetPurgeLogFilesOlderThan;
     property HoldStream: Boolean read fHoldStream write fHoldStream;
-    Property IngoreLogTime: Boolean read FIngoreLogTime Write SetIngoreLogTime;
+    Property IngoreLogRollTimeCheck: Boolean read FIngoreLogRollTimeCheck Write SetIngoreLogTime;
   end;
 
 function GeneralLogIsOpen: Boolean;
@@ -372,52 +372,52 @@ end;
 
 function PurgeFileStrmOverSz(AFileStream: TFileStream;
   ALimitSz: Integer): Boolean;
-//var
-//  MemStream: TMemoryStream;
-//  OldSz: Int64;
-//  ToCopy: Int64;
-//  s: AnsiString;
+// var
+// MemStream: TMemoryStream;
+// OldSz: Int64;
+// ToCopy: Int64;
+// s: AnsiString;
 
 begin
   raise Exception.Create
     ('Not sure PurgeFileStrmOverSz does what we want it to');
 
-(*
-  Result := false;
-  if ALimitSz < 1000 then
+  (*
+    Result := false;
+    if ALimitSz < 1000 then
     raise Exception.Create('PurgeFileStrmOverSz too small');
-  if AFileStream = nil then
+    if AFileStream = nil then
     Exit;
-  OldSz := AFileStream.Seek(Int64(0), soFromEnd);
-  if (OldSz < ALimitSz) then
+    OldSz := AFileStream.Seek(Int64(0), soFromEnd);
+    if (OldSz < ALimitSz) then
     Exit;
 
-  try
+    try
     AFileStream.Position := OldSz - Trunc(ALimitSz * 0.1);
     ToCopy := OldSz - AFileStream.Position;
     MemStream := TMemoryStream.Create;
     try
-      MemStream.CopyFrom(AFileStream, ToCopy);
-      AFileStream.Position := 0;
-      AFileStream.Size := 0;
-      s := #13#10 + '<Truncating Here :: ' + LogDateStamp + '>' +
-        #13#10 + #13#10;
-{$IFDEF NextGen}
-      s.WriteBytesToStrm(AFileStream, s.Length);
-{$ELSE}
-      AFileStream.Write(s[1], Length(s));
-{$ENDIF}
-      MemStream.Position := 0;
-      AFileStream.CopyFrom(MemStream, 0);
+    MemStream.CopyFrom(AFileStream, ToCopy);
+    AFileStream.Position := 0;
+    AFileStream.Size := 0;
+    s := #13#10 + '<Truncating Here :: ' + LogDateStamp + '>' +
+    #13#10 + #13#10;
+    {$IFDEF NextGen}
+    s.WriteBytesToStrm(AFileStream, s.Length);
+    {$ELSE}
+    AFileStream.Write(s[1], Length(s));
+    {$ENDIF}
+    MemStream.Position := 0;
+    AFileStream.CopyFrom(MemStream, 0);
     finally
-      MemStream.Free;
+    MemStream.Free;
     end;
     Result := true;
-  except
+    except
     on E: Exception do
-      raise Exception.Create('PurgeFileStrmOverSz::' + E.Message);
-  end;
-*)
+    raise Exception.Create('PurgeFileStrmOverSz::' + E.Message);
+    end;
+  *)
 end;
 
 { TLogFile }
@@ -478,6 +478,8 @@ var
 
 begin
   Try
+    if Assigned(GlobalCountOfComsObjectTypes) then
+      GlobalCountOfComsObjectTypes.CountComsTypes(Self, true);
     fHoldStream := AHoldStream;
     FLock := TCriticalSection.Create;
     FRollNotTruncate := ARollLogWhenFull;
@@ -506,17 +508,17 @@ begin
     begin
       FreeAndNil(FFileStm);
       Try
-{$IfDef ISD11A_DELPHI}
+{$IFDEF ISD11A_DELPHI}
         sz := TFile.GetSize(FFileName);
-{$Else}
+{$ELSE}
         Try
-         FFileStm:=TFileStream.Create(FFileName, fmOpenRead or
-        fmShareDenyNone);  //fmOpenread ??? deletes file???
-         sz := FFileStm.Seek(Int64(0), soFromEnd);
+          FFileStm := TFileStream.Create(FFileName, fmOpenRead or
+            fmShareDenyNone); // fmOpenread ??? deletes file???
+          sz := FFileStm.Seek(Int64(0), soFromEnd);
         Finally
-         FreeAndNil(FFileStm);
+          FreeAndNil(FFileStm);
         End;
-{$EndIf}
+{$ENDIF}
         if FLimitSz < sz then
           if (FLimitSz > 100) then
             if (FRollNotTruncate) then
@@ -546,6 +548,8 @@ End;
 destructor TLogFile.Destroy;
 begin
   Try
+    if Assigned(GlobalCountOfComsObjectTypes) then
+      GlobalCountOfComsObjectTypes.CountComsTypes(Self, false);
     Try
       if FLock <> nil then
         FLock.Acquire;
@@ -554,9 +558,9 @@ begin
     FreeAndNil(FFileStm);
     // Writeln('Closing');
 
-    if LogFT = self then
+    if LogFT = Self then
       LogFT := nil;
-    if ExceptLog = self then
+    if ExceptLog = Self then
       ExceptLog := nil;
 
     FreeAndNil(FLock);
@@ -618,11 +622,11 @@ begin
       Inc(FLastLoggedRepeat);
       FLastLoggedTime := Now;
       if FLastLoggedRepeat > 500 then
-        Begin
-//        FLastLoggedRepeat:=0; Reset by this message
-        if FLastLogMessage<> '500 #Repeats Logged' then
-          LogAline('500 #Repeats Logged');
-        End;
+      Begin
+        // FLastLoggedRepeat:=0; Reset by this message
+        if FLastLogMessage <> '500 #Repeats Logged' then
+          LogALine('500 #Repeats Logged');
+      End;
       Exit;
     End;
 
@@ -692,7 +696,7 @@ begin
         if FFileStm <> nil then
           if (FFileStm.Size > Round(1.2 * FLimitSz)) then
             if (FRollNotTruncate) then
-              RollLogFile(FIngoreLogTime)
+              RollLogFile(FIngoreLogRollTimeCheck)
             else if (FFileStm.Position > 1000) then
               PurgeFileStrmOverSz(FFileStm, FLimitSz);
       except
@@ -759,7 +763,7 @@ begin
     try
       if FFileStm <> nil then
         if (FFileStm.Size > Round(1.2 * FLimitSz)) then
-          RollLogFile(FIngoreLogTime);
+          RollLogFile(FIngoreLogRollTimeCheck);
     except
     end;
     If Not HoldStream then
@@ -909,9 +913,9 @@ end;
 procedure TLogFile.RollAndFlagNewApplication(ANoNewAppFlag: Boolean);
 begin
   if LogFT = nil then
-    LogFT := self;
+    LogFT := Self;
 
-  if LogFT <> self then
+  if LogFT <> Self then
   Begin
     LogALine('Error LogFt<>Self :' + FFileName);
     LogFT.LogALine('Error LogFt<>Self :' + FFileName);
@@ -959,21 +963,29 @@ begin
       CrtFile := TFileStream.Create(CreateName, FmCreate);
       Try
         s := LogDateStamp + #13#10;
-{$IfDef NextGen}
+{$IFDEF NextGen}
         CrtFile.Write(s, s.Length);
-{$Else}
+{$ELSE}
         CrtFile.Write(s[1], Length(s));
-{$Endif}
+{$ENDIF}
         s := 'Rolled File Prev Copy was ' + NewName + #13#10#13#10#13#10;
-{$IfDef NextGen}
+        if WillDisAbleLogging then
+        Begin
+          s:=s+'Logging was disabled'#13#10;
+          if AIgnoreTimeCheck then
+           s:= s+'Logging Restarted'#13#10 ;
+        End;
+{$IFDEF NextGen}
         CrtFile.Write(s, s.Length);
-{$Else}
+{$ELSE}
         CrtFile.Write(s[1], Length(s));
-{$Endif}
+{$ENDIF}
+
       Finally
         CrtFile.Free;
       End;
-
+      if WillDisAbleLogging then
+        LogALine('Logging Disabled');
       LogALine('Rolling ' + FFileName + ' to ' + NewName);
       LogALine(LogDateStamp);
       CreateTime := TFile.GetCreationTime(FFileName);
@@ -1004,12 +1016,14 @@ begin
     FDisAbleLogging := WillDisAbleLogging;
     FreeAndNil(FFileStm);
   end;
+  if AIgnoreTimeCheck then
+       FDisAbleLogging:=False;
   PurgeOldLogFiles;
 end;
 
 procedure TLogFile.SetIngoreLogTime(const Value: Boolean);
 begin
-  FIngoreLogTime := Value;
+  FIngoreLogRollTimeCheck := Value;
 
 end;
 

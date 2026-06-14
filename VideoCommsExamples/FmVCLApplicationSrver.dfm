@@ -15331,8 +15331,6 @@ object ServerForm: TServerForm
           Width = 122
           Height = 17
           Caption = 'Log TCP Open Close'
-          Checked = True
-          State = cbChecked
           TabOrder = 1
           OnClick = ChkBxLoggingClick
         end
@@ -15375,7 +15373,7 @@ object ServerForm: TServerForm
           OnClick = ChkBxLoggingClick
         end
         object ChkBxLogRc: TCheckBox
-          Left = 464
+          Left = 472
           Top = 40
           Width = 193
           Height = 17
@@ -15445,6 +15443,7 @@ object ServerForm: TServerForm
         Align = alTop
         Lines.Strings = (
           'MmoRegistrations')
+        ScrollBars = ssBoth
         TabOrder = 1
       end
     end
@@ -15456,6 +15455,24 @@ object ServerForm: TServerForm
     Height = 129
     Align = alTop
     TabOrder = 0
+    object LblFileDirectory: TLabel
+      Left = 803
+      Top = 39
+      Width = 78
+      Height = 13
+      Caption = 'File Or Directory'
+    end
+    object PnlBusy: TPanel
+      Left = 310
+      Top = 97
+      Width = 1021
+      Height = 26
+      Caption = 'Busy'
+      Color = clRed
+      ParentBackground = False
+      TabOrder = 13
+      Visible = False
+    end
     object BtnSendGetFile: TButton
       Left = 16
       Top = 39
@@ -15549,8 +15566,8 @@ object ServerForm: TServerForm
       OnClick = BtnSendBackStateClick
     end
     object BtnSrvResponseTimes: TButton
-      Left = 920
-      Top = 16
+      Left = 719
+      Top = 8
       Width = 147
       Height = 25
       Caption = 'Server Connection Status'
@@ -15558,8 +15575,8 @@ object ServerForm: TServerForm
       OnClick = BtnSrvResponseTimesClick
     end
     object BtnSrvDetails: TButton
-      Left = 920
-      Top = 64
+      Left = 719
+      Top = 66
       Width = 147
       Height = 25
       Caption = 'Wait For  Server Details'
@@ -15579,20 +15596,9 @@ object ServerForm: TServerForm
       TabOrder = 12
       OnChange = LblEdtMeteredSleepChange
     end
-    object PnlBusy: TPanel
-      Left = 736
-      Top = 24
-      Width = 153
-      Height = 89
-      Caption = 'Busy'
-      Color = clRed
-      ParentBackground = False
-      TabOrder = 13
-      Visible = False
-    end
     object BtnExternalServer: TButton
-      Left = 1112
-      Top = 8
+      Left = 1256
+      Top = 66
       Width = 273
       Height = 25
       Caption = 'Call External Server'
@@ -15600,8 +15606,8 @@ object ServerForm: TServerForm
       OnClick = BtnExternalServerClick
     end
     object CmbxExtnalServerSel: TComboBox
-      Left = 1112
-      Top = 66
+      Left = 1256
+      Top = 97
       Width = 569
       Height = 21
       TabOrder = 15
@@ -15609,6 +15615,32 @@ object ServerForm: TServerForm
       Visible = False
       OnEnter = CmbxExtnalServerSelExitEnter
       OnExit = CmbxExtnalServerSelExitEnter
+    end
+    object EdtServerFileDirectory: TEdit
+      Left = 887
+      Top = 39
+      Width = 340
+      Height = 21
+      TabOrder = 16
+      Text = 'Temp'
+    end
+    object BtnAvailableSrvrFiles: TButton
+      Left = 887
+      Top = 8
+      Width = 147
+      Height = 25
+      Caption = 'Available Srvr Files'
+      TabOrder = 17
+      OnClick = BtnAvailableSrvrFilesClick
+    end
+    object BtnGetThisFile: TButton
+      Left = 1040
+      Top = 8
+      Width = 147
+      Height = 25
+      Caption = 'Get This File'
+      TabOrder = 18
+      OnClick = BtnGetThisFileClick
     end
   end
   object PnlBottom: TPanel

@@ -14,6 +14,15 @@ https://forums.adug.org.au/t/android-file-read-write-permissions/60852
  the “Uses permissions” section on the project properties
  page. '
 
+
+{From Dave Notage April 2026 not implemented
+https://forums.adug.org.au/t/determining-android-version-or-something/61225/2
+
+For most purposes, using TOSVersion.Check from System.SysUtils e.g.
+if TOSVersion.Check(16) then
+  // Do something available/applicable in Android 16 or higher
+Is sufficient.
+It returns the API level, which is different from the OS version.
 }
 
 

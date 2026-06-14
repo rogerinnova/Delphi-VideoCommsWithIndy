@@ -57,9 +57,7 @@ Type
     FOutGoingGraphicsRequested, FOpenGraphicChannelToActiveRx: Boolean;
     FOnInComingGraphic: TInGraphicProc;
     FLastPayload: AnsiString;
-{$IFDEF Debug}
     FVideoInRptCount: integer;
-{$ENDIF}
 {$IFDEF UseVCLBITMAP}
     Class Function RecoverGraphic(AData: AnsiString): TGraphic;
 {$ELSE}
@@ -75,6 +73,7 @@ Type
     procedure WasClosedForcfullyOrGracefully; Override;
     function Write(AData: RawByteString): integer; override;
   Public
+    Constructor Create; override;
     Destructor Destroy; override;
     Function SetManager(AManager: TObject): Boolean;
     Procedure DropManager(AManager: TObject);
@@ -171,24 +170,19 @@ begin
   Begin
     If not ChannelActiveWithGraphic(360) then
     begin
+      if GblLogAllChlOpenClose then
+        ISIndyUtilsException(Self, '# Closing Graphic Channel ' + TextID);
       FOpenGraphicChannelToActiveRx := false;
-      if GblLogAllChlOpenClose then
-        if Assigned(OnLogMsg) then
-          LogAMessage('Closing Graphic Channel ' + TextID)
-        else
-          ISIndyUtilsException(Self, 'Closing Graphic Channel ' + TextID);
-    end
-    else if ChannelActiveWithGraphic(360) then
-    begin
-      FOpenGraphicChannelToActiveRx := true;
-      if GblLogAllChlOpenClose then
-        if Assigned(OnLogMsg) then
-          LogAMessage('Open Graphic Channel ' + TextID)
-        else
-          ISIndyUtilsException(Self, 'Open Graphic Channel ' + TextID);
-
     end;
-  End;
+  end
+  else if ChannelActiveWithGraphic(360) then
+    begin
+//      if not FOpenGraphicChannelToActiveRx then
+      if GblLogAllChlOpenClose then
+          ISIndyUtilsException(Self, '#Open Graphic Channel ' + TextID);
+      FOpenGraphicChannelToActiveRx := true;
+    end;
+
 end;
 
 function TVideoComsChannel.CloseChannel: Boolean;
@@ -197,8 +191,8 @@ Var
 begin
   FOutGoingGraphicsRequested := false;
   TimeStmp.SetValue(Now);
-  Result := FullDuplexDispatch(MediaCommandArray[CloseTraffic] +
-    TimeStmp.TransString, '');
+  Result := FullDuplexDispatchNoWait(MediaCommandArray[CloseTraffic] +
+    TimeStmp.TransString, 1) = 1;
 end;
 
 function TVideoComsChannel.CloseRemoteCircuit: Boolean;
@@ -206,8 +200,14 @@ Var
   TimeStmp: TTimeRec;
 begin
   TimeStmp.SetValue(Now);
-  Result := FullDuplexDispatch(MediaCommandArray[CloseTxCircuit] +
-    TimeStmp.TransString, '');
+  Result := FullDuplexDispatchNoWait(MediaCommandArray[CloseTxCircuit] +
+    TimeStmp.TransString, 1) = 1;
+end;
+
+constructor TVideoComsChannel.Create;
+begin
+  inherited;
+  FVideoInRptCount:=-1;
 end;
 
 destructor TVideoComsChannel.Destroy;
@@ -253,7 +253,13 @@ begin
     if FVideoInRptCount > 0 then
       Dec(FVideoInRptCount)
     Else
-      FVideoInRptCount := 50;
+    begin
+      if FVideoInRptCount<0 then
+        ISIndyUtilsException(Self, '#First Video In ' + TextID)
+      else
+        ISIndyUtilsException(Self, '#Video In Count of 100 ' + TextID);
+      FVideoInRptCount := 100;
+    end;
 {$ENDIF}
   StageComplete := 'Start';
   Try
@@ -300,7 +306,7 @@ begin
           StageComplete := 'Start FOutGoingGraphicsRequested';
           If FOutGoingGraphicsRequested then
             If not OpenChannel then // respond with open traffic
-              ISIndyUtilsException(Self, 'Open Channell Fail on' + TextID);
+              ISIndyUtilsException(Self, 'Open Channel Fail on ' + TextID);
         end;
       CloseTxCircuit:
         Begin
@@ -347,8 +353,8 @@ begin
   FOutGoingGraphicsRequested := true;
   FOpenGraphicChannelToActiveRx := true;
   TimeStmp.SetValue(Now);
-  Result := FullDuplexDispatch(MediaCommandArray[OpenTraffic] +
-    TimeStmp.TransString, '');
+  Result := FullDuplexDispatchNoWait(MediaCommandArray[OpenTraffic] +
+    TimeStmp.TransString, 1)< 5;
   if GblLogPollActions then
     ISIndyUtilsException(Self, 'Open# Traffic on ' + TextID);
 end;
@@ -535,7 +541,7 @@ var
 {$IFNDEF NextGen}
   st: LongInt;
   Rptr: PAnsiChar;
-{$Endif}
+{$ENDIF}
 begin
   Sz := AStrm.Size;
   if Sz > 20000000 then
