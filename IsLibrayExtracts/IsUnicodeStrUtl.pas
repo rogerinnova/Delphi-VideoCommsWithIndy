@@ -19,7 +19,7 @@ uses
   IsNextGenPickup,
 {$ENDIF}
 {$IfDef FPC}
-  UITypes, SysUtils, Classes,
+  {UITypes,} SysUtils, Classes,
   IsWindowsPickUp
 {$ELSE}
 {$IFDEF ISXE2_DELPHI}

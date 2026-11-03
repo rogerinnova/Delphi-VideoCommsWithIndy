@@ -35,6 +35,7 @@ type
     BtnEcho: TButton;
     BtnStopVideo: TButton;
     BtnAllLogsToServer: TButton;
+    BtnPurgeConsoleFiles: TButton;
     procedure BtnRestartLinkClick(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
     procedure FormCreate(Sender: TObject);
@@ -47,14 +48,15 @@ type
     procedure BtnStopVideoClick(Sender: TObject);
     procedure CmbxServerSelChange(Sender: TObject);
     procedure BtnAllLogsToServerClick(Sender: TObject);
+    procedure BtnPurgeConsoleFilesClick(Sender: TObject);
   private
     { Private declarations }
 
     FVideoDisable, FFormInDestroy: boolean;
-    FDelayFormCreateActions: boolean;
+    FTryInFive, FDelayFormCreateActions: boolean;
     fKnownServers: TStringList;
     FCurSrvConnectionString: string;
-
+    FLogTimer: TThread;
     FImagesActuallySent, FCameraImages, FStep: integer;
     FConnectionToServer: TVideoComsChannel;
     // FConnectionToExtServer, FConnectionFrmExtServer, FConnectionToExtServer2,
@@ -217,6 +219,12 @@ begin
   ShowLogFile;
 end;
 
+procedure TFmDummyCamerraForTestingSrvr.BtnPurgeConsoleFilesClick(
+  Sender: TObject);
+begin
+  PurgeConsoleFiles;
+end;
+
 procedure TFmDummyCamerraForTestingSrvr.BtnResetClick(Sender: TObject);
 begin
   Try
@@ -243,13 +251,13 @@ begin
   Begin
     if MediaDevices <> nil then
     Begin
-      BtnRestartLink.Text := 'Connected ' + ConnectionToServer.TextID +
+      BtnRestartLink.Text := 'Connected ' + FConnectionToServer.TextID +
         FormatDateTime('   hh:nn:ss', now);
     End
     else
       BtnRestartLink.Text := 'No Camera ' + FormatDateTime('nn:ss', now);
   End;
-  EdtServerUrl.Visible := ConnectionToServer = nil;
+  EdtServerUrl.Visible := FConnectionToServer = nil;
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.BtnStopVideoClick(Sender: TObject);
@@ -308,6 +316,7 @@ Var
   Srv: string;
   Port: integer;
 begin
+  FTryInFive := false;
   if (EdtServerUrl.Visible) and TISIndyTCPBase.ExpandSrvRefCode
     (EdtServerUrl.Text, Srv, Port) then
     FCurSrvConnectionString := EdtServerUrl.Text
@@ -354,8 +363,9 @@ begin
       Exit;
 
     if FConnectionToServer.ServerSetRefConnection
-      (CDummyCameraLink + IntToStr(Random(9900) + 100)) then
+    // (CDummyCameraLink + IntToStr(Random(9900) + 100)) then
     // 1 chance in 9900 of Rx channels sharing registration
+      (CDummyCameraLink + IntToStr(FConnectionToServer.LocalPort)) then
     Begin
       If EdtServerUrl.Visible then
         UpdateConnections;
@@ -399,8 +409,7 @@ begin
     UpdateConnections;
     GLogISIndyUtilsException := true;
     if ExceptLog = nil then
-      OpenAppLogging(true, '', GblLogAllChlOpenClose,
-        GlobalTCPLogAllData,
+      OpenAppLogging(true,true, '', GblLogAllChlOpenClose, GlobalTCPLogAllData,
         GblLogPollActions, GblRptRegConnectiononSrvr,
         GblRptSrvrRelayConnectionAttempts);
     ISIndyUtilsException(self, 'DelayedSetup');
@@ -430,6 +439,7 @@ begin
     End;
   Except
   End;
+  FLogTimer:= TIsFifteenMinuteLogger.Create;
 end;
 
 procedure TFmDummyCamerraForTestingSrvr.FormDestroy(Sender: TObject);
@@ -437,6 +447,7 @@ begin
   FFormInDestroy := true;
   BtnResetClick(nil);
   FreeAndNil(fKnownServers);
+  FLogTimer.Terminate;
   GblIndyComsObjectFinalize;
   TSingletonObjTimeSpanRecording.ReleaseSingletonTimeStats;
 end;
@@ -736,12 +747,21 @@ begin
       if not FConnectionToServer.Active then
       Begin
         if GblLogAllChlOpenClose then
-          ISIndyUtilsException(Self,
-            '#TFmDummyCamerraForTestingSrvr.Timer1Timer Free Channel::' + FConnectionToServer.TextID);
+          ISIndyUtilsException(self,
+            '#TFmDummyCamerraForTestingSrvr.Timer1Timer Free Channel::' +
+            FConnectionToServer.TextID);
         FreeAndNilDuplexChannel(FConnectionToServer);
       end;
     if FConnectionToServer = nil then
       BtnRestartLink.Text := 'Retry ' + FormatDateTime('nn:ss', now);
+
+    if FConnectionToServer <> nil then
+      FTryInFive := false
+    else if FTryInFive then
+      BtnRestartLinkClick(nil)
+    else
+      FTryInFive := true;
+
   finally
     Timer1.Interval := 5000;
     Timer1.Enabled := true;

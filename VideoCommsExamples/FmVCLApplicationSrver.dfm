@@ -15322,6 +15322,8 @@ object ServerForm: TServerForm
           Width = 177
           Height = 17
           Caption = 'Log Make Connection On Server '
+          Checked = True
+          State = cbChecked
           TabOrder = 0
           OnClick = ChkBxLoggingClick
         end
@@ -15331,6 +15333,8 @@ object ServerForm: TServerForm
           Width = 122
           Height = 17
           Caption = 'Log TCP Open Close'
+          Checked = True
+          State = cbChecked
           TabOrder = 1
           OnClick = ChkBxLoggingClick
         end
@@ -15641,6 +15645,15 @@ object ServerForm: TServerForm
       Caption = 'Get This File'
       TabOrder = 18
       OnClick = BtnGetThisFileClick
+    end
+    object BtnPurgeConsoleFiles: TButton
+      Left = 496
+      Top = 66
+      Width = 217
+      Height = 25
+      Caption = 'BtnPurgeConsoleFiles'
+      TabOrder = 19
+      OnClick = BtnPurgeConsoleFilesClick
     end
   end
   object PnlBottom: TPanel

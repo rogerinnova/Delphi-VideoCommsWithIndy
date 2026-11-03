@@ -11,7 +11,7 @@ interface
 
 uses
 {$IFDEF FPC}
-  UITypes, SysUtils, Classes, Math
+  {UITypes,} SysUtils, Classes, Math
 {$ELSE}
 {$IFDEF ISXE2_DELPHI}
 {$IFDEF MSWINDOWS}

@@ -12,7 +12,7 @@
 
 interface
 {$IfDef FPC}
-uses Math, SysUtils, Types, UITypes, Classes, Variants
+uses Math, SysUtils, Types, {UITypes,} Classes, Variants
 {$Else}
 uses Math, System.SysUtils, System.Types, System.UITypes, System.Classes,
 System.Variants

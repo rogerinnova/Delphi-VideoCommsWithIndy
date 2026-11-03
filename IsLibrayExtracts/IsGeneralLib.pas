@@ -17,7 +17,7 @@ interface
 
 uses
 {$IFDEF FPC}
- Classes, UITypes,SyncObjs,SysUtils,//IOUtils,
+ Classes, {UITypes,} SyncObjs,SysUtils,//IOUtils,
 {$ELSE}
 {$IFDEF ISXE2_DELPHI}
 {$IFDEF MSWINDOWS}

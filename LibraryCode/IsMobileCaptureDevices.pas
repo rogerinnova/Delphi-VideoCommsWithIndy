@@ -424,7 +424,7 @@ begin
                 End;
               if ProgressMsgCount < 0 then
                 if GblRptSendImages then
-                  FLCopyVideoComsChls[I].LogAMessage
+                  FLCopyVideoComsChls[I].LogTextOnServer
                     ('Img Sent (' + intToStr(ImagesSent) + ')Chnls ' +
                     FormatDateTime('hh:nn:ss.zz', now));
             Except

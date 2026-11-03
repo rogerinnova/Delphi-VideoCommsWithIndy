@@ -187,4 +187,14 @@ object FmDummyCamerraForTestingSrvr: TFmDummyCamerraForTestingSrvr
     Text = 'BtnCloseLog'
     OnClick = BtnCloseLogClick
   end
+  object BtnPurgeConsoleFiles: TButton
+    Position.X = 512.000000000000000000
+    Position.Y = 120.000000000000000000
+    Size.Width = 145.000000000000000000
+    Size.Height = 22.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 30
+    Text = 'BtnPurgeConsoleFiles'
+    OnClick = BtnPurgeConsoleFilesClick
+  end
 end

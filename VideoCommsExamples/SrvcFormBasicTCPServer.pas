@@ -6,7 +6,7 @@ uses
   Winapi.Windows, Winapi.Messages,
   System.IniFiles,
   System.SysUtils, System.Classes, Vcl.Graphics, Vcl.Controls, Vcl.SvcMgr,
-  Vcl.Dialogs,
+  Vcl.Dialogs, IsLogging,
   IsIndyTCPApplicationServer, IsRemoteConnectionIndyTCPObjs;
 
 type
@@ -16,7 +16,10 @@ type
   private
     { Private declarations }
     FCommsServer: TIsIndyApplicationServer;
+    FTestServer: TIsMonitorTCPAppServer;
+    FTimeInLog: TThread;
     Function CommsServer: TIsIndyApplicationServer;
+    Function TestServer: TIsMonitorTCPAppServer;
     Function OnAnsiStringRx(ACommand: ansistring; ATcpSession: TISIndyTCPBase)
       : ansistring;
     Function OnSimpleActionRx(ACommand: ansistring; ATcpSession: TISIndyTCPBase)
@@ -78,6 +81,7 @@ begin
     the only restrict on this process is that it is thread safe }
   ISIndyUtilsException(self, FormatDateTime('hh:nn:ss ', Now) +
     ATcpSession.TextID + ' OnSimpleActionRx::' + ACommand);
+  Result := '';
 end;
 
 function TDemoTCPBasicServer.OnStringActionRX(AData: String;
@@ -88,6 +92,7 @@ begin
     the only restrict on this process is that it is thread safe }
   ISIndyUtilsException(self, FormatDateTime('hh:nn:ss ', Now) +
     ATcpSession.TextID + ' OnStringActionRX::' + AData);
+  Result := '';
 end;
 
 procedure TDemoTCPBasicServer.ServiceCreate(Sender: TObject);
@@ -96,13 +101,15 @@ Var
   BaseDir: String;
 begin
   // For demo Also class function TAppObj.AppObj: TAppObj;
-  OpenAppLogging(true, '');
+  OpenAppLogging(true, false, '');
   // GblRptSendImages := false;
+{$IFDEF Debug}
   GblRptMakeConnectionOnSrvr := true;
   GblLogAllChlOpenClose := true;
   GblRptTimeoutClear := true;
   GLogISIndyUtilsException := true;
   GblRptRegConnectiononSrvr := true;
+{$ENDIF}
   // For demo Also class function TAppObj.AppObj: TAppObj;
 
   if Not FileExists(IniFileNameFromExe) then
@@ -131,6 +138,9 @@ begin
     ISIndyUtilsException(self, '#Server default port =' +
       IntToStr(FCommsServer.DefaultPort));
     ISIndyUtilsException('', FCommsServer.ServerDetailsAsText);
+    TestServer;
+    FTimeInLog := TIsFifteenMinuteLogger.Create;
+    ISIndyUtilsException(self, 'Starting');
   Except
     On E: Exception do
     Begin
@@ -145,10 +155,27 @@ procedure TDemoTCPBasicServer.ServiceDestroy(Sender: TObject);
 begin
   Try
     FCommsServer.free;
+    FTestServer.free;
+    if FTimeInLog <> nil then
+      FTimeInLog.Terminate;
   Except
     On E: Exception do
       ISIndyUtilsException(self, E, 'ServiceDestroy');
   End;
+end;
+
+function TDemoTCPBasicServer.TestServer: TIsMonitorTCPAppServer;
+Var
+  Address: String;
+  Port: Integer;
+begin
+  If FTestServer = nil then
+  Begin
+    Address := 'localhost';
+    Port := CommsServer.DefaultPort;
+    FTestServer := TIsMonitorTCPAppServer.Create(Address, Port);
+  End;
+  Result := FTestServer;
 end;
 
 end.

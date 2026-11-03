@@ -34,6 +34,7 @@ uses
   IsMediaCommsObjs, IsImageManagerVCL;
 
 type
+  TMonitorVclActivityThread = Class;
 
   { TServerForm }
 
@@ -85,6 +86,7 @@ type
     LblFileDirectory: TLabel;
     BtnAvailableSrvrFiles: TButton;
     BtnGetThisFile: TButton;
+    BtnPurgeConsoleFiles: TButton;
     procedure FormDestroy(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
@@ -109,12 +111,15 @@ type
     procedure CmbxExtnalServerSelExitEnter(Sender: TObject);
     procedure BtnAvailableSrvrFilesClick(Sender: TObject);
     procedure BtnGetThisFileClick(Sender: TObject);
+    procedure BtnPurgeConsoleFilesClick(Sender: TObject);
   private
     { Private declarations }
     FFormInDestroy: Boolean;
     // FImageSetUp: boolean;
     FImageManager: TImageMngrVCL;
+    FTimeInLog: TThread; // TIsFifteenMinuteLogger;
     FRxText: string;
+    FActivityMonitor: TMonitorVclActivityThread;
     FWaitSync: TCriticalSection;
     FCommsServer, FSecondaryComsServer: TIsIndyApplicationServer;
     // FCameraVideoChnl,
@@ -131,12 +136,13 @@ type
     FCurSrvListeningPort: integer;
     FCurSrvConnectionString: string;
     FUseExternalServer: Boolean;
-    FNextStatusTimer, FNextCleanupTimer: TDateTime;
+    FNextCleanupTimer: TDateTime;
     Procedure BusyStart;
     Procedure BusyEnd;
     Procedure LoadIniDetails;
     Procedure SaveIniDetails;
     procedure AlignCurServerToComboBox;
+    Procedure DoIdleFunctions(Sender: TObject; var Done: Boolean);
     Function CommsServer: TIsIndyApplicationServer;
     Function ImageManager: TImageMngrVCL;
     Function WaitSync: TCriticalSection;
@@ -174,6 +180,18 @@ type
   public
     { Public declarations }
   end;
+
+  TMonitorVclActivityThread = Class(TThread)
+  Private
+    FFormIsActive: Boolean;
+  protected
+    procedure Execute; override;
+  public
+    FForm: TServerForm;
+    constructor Create(AForm: TServerForm); overload;
+    destructor Destroy; override;
+    Procedure Reset;
+  End;
 
 var
   ServerForm: TServerForm;
@@ -518,6 +536,7 @@ begin
     BtnChkLinkState.Enabled := False;
   End;
   CheckExistingConnections;
+  Caption := 'Using Server ' + FCurSrvConnectionString;
 end;
 
 procedure TServerForm.BtnStartStopMonitorClick(Sender: TObject);
@@ -832,6 +851,11 @@ begin
   end;
 end;
 
+procedure TServerForm.BtnPurgeConsoleFilesClick(Sender: TObject);
+begin
+  PurgeConsoleFiles;
+end;
+
 procedure TServerForm.BtnSendBackStateClick(Sender: TObject);
 Var
   // FwdRsp: ansistring;
@@ -1024,6 +1048,7 @@ begin
       // MmoRexData.selstart := MaxInt;
     finally
       WillWait.Free;
+      // Test Double free      WillWait.Free;
       ConnectList.Free;
     End;
   finally
@@ -1089,7 +1114,9 @@ procedure TServerForm.BtnTestAutoCloseAndHoldClick(Sender: TObject);
       if GlobalSelectDebugChn = nil then
       Begin
         GlobalSelectDebugChn := Duplex;
+{$IFDEF Debug}
         GlobalDbugRegisteredAs := RegStrg;
+{$ENDIF}
       End;
       FSaveAllOldSessions.AddObject(RegStrg, Duplex); // no 2
       Duplex.ServerConnections(nil, RegStrg);
@@ -1496,12 +1523,26 @@ begin
   Result := FCommsServer;
 end;
 
+procedure TServerForm.DoIdleFunctions(Sender: TObject; var Done: Boolean);
+begin
+  Try
+    ImageManager.LoopAllLinksInIdle;
+
+  Except
+    On E: exception do
+      ISIndyUtilsException(self, E, 'DoIdleFunctions');
+  end;
+  Done := true;
+end;
+
 procedure TServerForm.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
 Var
   Stats: String;
 begin
   try
     BusyStart;
+    if FTimeInLog <> nil then
+      FTimeInLog.Terminate;
     Stats := TSingletonObjTimeSpanRecording.SingletonLifeTimeStats;
 
     ISIndyUtilsException(self, #13#10'FormCloseQuery#'#13#10);
@@ -1546,14 +1587,15 @@ begin
   GblLogAllChlOpenClose := true;
   GblRptTimeoutClear := true;
   GLogISIndyUtilsException := true;
+  // Open Before Logging
+  TGblRptComs.ReportObjectTypes; // Start Counting
   // OpenAppLogging in Delay if FMX
-  OpenAppLogging(true, '', GblLogAllChlOpenClose, GlobalTCPLogAllData,
+  OpenAppLogging(true, true, '', GblLogAllChlOpenClose, GlobalTCPLogAllData,
     GblLogPollActions, GblRptRegConnectiononSrvr,
     GblRptSrvrRelayConnectionAttempts);
 
   ChkBxLoggingClick(nil); // Direct Set Logging to Chkboxes
 
-  TGblRptComs.ReportObjectTypes; // Start Counting
   if Not FileExists(IniFileNameFromExe) then
     Try
       BaseDir := ExtractFileDir(IniFileNameFromExe) + '\Data';
@@ -1572,6 +1614,8 @@ begin
     End;
 
   MmoInfo.Clear;
+
+  Application.OnIdle := DoIdleFunctions;
   Try
     if FCommsServer = nil then
     begin
@@ -1595,6 +1639,7 @@ begin
       raise exception.Create('Failed to Start Commsserver:: Error=' +
         E.Message);
   End;
+  FTimeInLog := TIsFifteenMinuteLogger.Create;
 end;
 
 procedure TServerForm.FormDestroy(Sender: TObject);
@@ -1612,10 +1657,13 @@ end;
 procedure TServerForm.FreeAllResourcesBeforeClose;
 var
   LogAfterFinalize: TLogFile;
+  LoopChk: integer;
 begin
   Try
     Try
       FFormInDestroy := true;
+      if FActivityMonitor <> nil then
+        FActivityMonitor.Terminate;
       FreeAndNil(FSendMessageback);
       ISIndyUtilsException(self,
         'FreeAllResourcesBeforeClose # FreeAndNil(FSendMessageback)');
@@ -1629,11 +1677,13 @@ begin
         FNoWaitCntrlChl.Terminate;
       ISIndyUtilsException(self,
         'FreeAllResourcesBeforeClose #  FNoWaitCntrlChl.Terminate');
+      ISIndyUtilsException(self,
+        'FreeAllResourcesBeforeClose # Do FImageManager');
       FreeAndNil(FImageManager); // Release calls before server
       ISIndyUtilsException(self,
         'FreeAllResourcesBeforeClose # Nil(FImageManager)');
       sleep(1000); // allow time to process no wait rtn terminate
-      ISIndyUtilsException(self, 'sleep(1000);');
+      ISIndyUtilsException(self, 'After sleep(1000);');
       // Application.ProcessMessages; // before closing server
       ISIndyUtilsException(self,
         'FreeAllResourcesBeforeClose # FreeAndNil(FWaitSync)');
@@ -1649,7 +1699,22 @@ begin
       FreeAndNil(FSecondaryComsServer);
       ISIndyUtilsException(self,
         'FreeAllResourcesBeforeClose # FreeAndNil(FSecondaryComsServer)');
-      GblIndyComsObjectFinalize; // Bring Forward Fo Fast MM
+      if FActivityMonitor <> nil then
+        ISIndyUtilsException(self,
+          'FreeAllResourcesBeforeClose # FActivityMonitor<>nil')
+      else
+        ISIndyUtilsException(self,
+          'FreeAllResourcesBeforeClose # FActivityMonitor=nil');
+      LoopChk := 10;
+      While (FActivityMonitor <> nil) and (LoopChk > 0) do
+      begin
+        ISIndyUtilsException(self,
+          'FreeAllResourcesBeforeClose # FActivityMonitor<>nil');
+        sleep(1000);
+        Dec(LoopChk);
+      end;
+      ApplicationFlagThreadMsg('Server Form FreeAllResourcesBeforeClose');
+      GblIndyComsObjectFinalize; // Bring Forward For Fast MM
     Except
       On E: exception do
         ISIndyUtilsException(self, E, '#FreeAllResourcesBeforeClose Frees')
@@ -1714,9 +1779,12 @@ begin
     Exit;
   end;
   If FImageManager = nil then
-  begin
-    FImageManager := TImageMngrVCL.Create(PnlRxImage, 1);
-  end;
+    Try
+      FImageManager := TImageMngrVCL.Create(PnlRxImage, 1);
+    Except
+      On E: exception do
+        ISIndyUtilsException(self, E, 'ImageManager');
+    end;
   Result := FImageManager;
 end;
 
@@ -1980,7 +2048,8 @@ Var
 begin
   if FFormInDestroy then
     Exit;
-  Result := ''; // This code does response
+  Result := '';
+  // This code does response
   if ACommand = '' then
     Exit; // was a poll
 
@@ -2127,10 +2196,12 @@ Var
   PkData: AnsiString;
 begin
   LocalCopy := nil;
-  if AConnectObj is TVideoComsChannel then // Session is connected
+  if AConnectObj is TVideoComsChannel then
+    // Session is connected
     LocalCopy := TVideoComsChannel(AConnectObj)
   Else if AConnectObj <> nil then
-    Raise exception.Create('AConnectObj not nil in SendMockCameraImage');
+    Raise exception.Create
+      ('AConnectObj not TVideoComsChannel in SendMockCameraImage');
 
   if LocalCopy <> nil then
   begin
@@ -2138,6 +2209,7 @@ begin
       if FSendVideoChnl <> LocalCopy then
         raise exception.Create
           ('AConnectObj not same as FSendVideoChnl in SetUpMockCameraLink');
+
     if not Assigned(LocalCopy.OnDestroy) then
     Begin
       LocalCopy.OnInComingGraphic := HandleInComingGraphicOnVideoRx;
@@ -2150,7 +2222,7 @@ begin
       PkData := TVideoComsChannel.PackGraphic(ImgSend.Picture.Graphic);
       FSendVideoChnl.FullDuplexDispatchNoWait(PkData, 1);
       FSendVideoChnl.FullDuplexDispatchNoWait(PkData, 1);
-      FSendVideoChnl.FullDuplexDispatchNoWait(PkData, -1);
+      // FSendVideoChnl.FullDuplexDispatchNoWait(PkData, -1);
     end;
   end;
 end;
@@ -2164,7 +2236,8 @@ Var
   Rslt: TStringList;
 begin
   LocalCopy := nil;
-  if AConnectObj is TVideoComsChannel then // Session is connected
+  if AConnectObj is TVideoComsChannel then
+    // Session is connected
     LocalCopy := TVideoComsChannel(AConnectObj)
   Else if AConnectObj <> nil then
     Raise exception.Create('AConnectObj not nil in SetupVideoPathAndAdvertise')
@@ -2261,17 +2334,33 @@ begin
       On E: exception do
         ISIndyUtilsException(self, E, 'Log File Read Fail');
     end;
-  if ExceptLog <> nil then
-    ExceptLog.RollAndFlagNewApplication(true);
+  // if ExceptLog <> nil then
+  // ExceptLog.RollAndFlagNewApplication(true);
 end;
 
 procedure TServerForm.TimerCleanupTimer(Sender: TObject);
 begin
+  if not TimerCleanup.Enabled then
+    ISIndyUtilsException(self, '#Not TimerCleanup.Enabled');
   TimerCleanup.Enabled := False;
   Try
     Try
       if FFormInDestroy then
         Exit;
+      if FActivityMonitor = nil then
+      Begin
+        FActivityMonitor := TMonitorVclActivityThread.Create(self);
+        FActivityMonitor.Reset;
+        FActivityMonitor.Start;
+      End
+      Else
+        FActivityMonitor.Reset;
+      if IsNotMainThread then
+        ISIndyUtilsException(self,
+          'Is Not Main Thread #TimerCleanupTimer SendVideoChnl')
+      else
+        ISIndyUtilsException(self,
+          'Is Main Thread #TimerCleanupTimer SendVideoChnl');
 
       LinkAnyDefaultCamerasLaunch;
 
@@ -2335,11 +2424,21 @@ end;
 
 procedure TServerForm.TimerStatusTimer(Sender: TObject);
 begin
+  if not TimerStatus.Enabled then
+    ISIndyUtilsException(self, '#Not TimerStatus.Enabled');
   TimerStatus.Enabled := False;
   Try
     Try
+      if IsNotMainThread then
+        ISIndyUtilsException(self, 'Is Not Main Thread #TimerStatusTimer')
+        // else
+        // ISIndyUtilsException(self, 'Is Main Thread #TimerStatusTimer')
+          ;
+
       if FFormInDestroy then
         Exit;
+      if FActivityMonitor <> nil then
+        FActivityMonitor.Reset;
       MmoInfo.Lines.Add('');
       MmoInfo.Lines.Add('');
       MmoInfo.Lines.Add('');
@@ -2361,12 +2460,6 @@ begin
       MmoInfo.Lines.Add('Comms Objects');
       MmoInfo.Lines.Add(TGblRptComs.ReportObjectTypes);
 
-      If FNextStatusTimer < now then
-      Begin
-        FNextStatusTimer := now + 1 / 24 / 4;
-        ISIndyUtilsException(self, 'TimerStatusTimer # ::' +
-          FormatDateTime('dd mmmm hh:nn:ss.zzz', now));
-      End;
       if FRxText <> '' then
       Begin
         MmoInfo.Lines.Add('');
@@ -2403,6 +2496,59 @@ begin
   if FWaitSync = nil then
     FWaitSync := TCriticalSection.Create;
   Result := FWaitSync;
+end;
+
+{ TMonitorVclActivityThread }
+
+constructor TMonitorVclActivityThread.Create(AForm: TServerForm);
+begin
+  FForm := AForm;
+  Inherited Create(true);
+  FreeOnTerminate := true;
+end;
+
+destructor TMonitorVclActivityThread.Destroy;
+begin
+  if FForm <> nil then
+    FForm.FActivityMonitor := nil;
+  inherited;
+end;
+
+procedure TMonitorVclActivityThread.Execute;
+Var
+  MsgCount, SleepCount, MonitorSleepMsecs: integer;
+begin
+  MsgCount := 40;
+  MonitorSleepMsecs := FForm.TimerCleanup.Interval * 2 Div 50;
+  ISIndyUtilsException(self, '#Execute Timeout Open ' + IntToStr(MsgCount));
+  while (MsgCount > 0) and Not Terminated do
+    try
+      while FFormIsActive and Not Terminated do
+      Begin
+        FFormIsActive := False;
+        SleepCount := 50;
+        While (SleepCount > 0) and not FFormIsActive and Not Terminated do
+        Begin
+          sleep(MonitorSleepMsecs);
+          Dec(SleepCount);
+        End;
+      End;
+      Dec(MsgCount);
+      if not FFormIsActive then
+        ISIndyUtilsException(self, '#Execute Timeout ' + IntToStr(MsgCount));
+      if MsgCount < 1 then
+        MsgCount := 50;
+    Except
+      On E: exception do
+        ISIndyUtilsException(self, E, '#Execute Close Thread ' +
+          IntToStr(MsgCount));
+    End;
+  ISIndyUtilsException(self, '#Execute Close Thread ' + IntToStr(MsgCount));
+end;
+
+procedure TMonitorVclActivityThread.Reset;
+begin
+  FFormIsActive := true;
 end;
 
 end.

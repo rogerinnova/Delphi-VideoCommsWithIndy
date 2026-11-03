@@ -142,7 +142,7 @@ Type
       If MsgBuf.MsgToRead(Txt) then
       MmoLogs.Add(Txt }
   Private
-    FListLock: TCriticalSection;
+    FMsgBfrListLock: TCriticalSection;
     FData: TStringlist;
   public
     Constructor Create;
@@ -155,22 +155,25 @@ Type
 
   TISIndyTCPBase = Class(TObject)
   Strict Private
+    FConnected: boolean;
+    FTCPLock: TCriticalSection;
     FReadWaitCount: integer;
+    FBasePortID: String;
+    // Do Not use PortId in Lock Connection as it calls Lock/Unlock
     Procedure ReadRestOfTransaction(Var ABuffer: TIdBytes;
       AFullTransactionDataSz: integer);
     Procedure DecWaitAndProcess;
     Procedure ProcessHeaderWithLeftOver(Var ABuffer: TIdBytes);
     Procedure ProcessHeaderWithoutLeftOver(Var ABuffer: TIdBytes);
   Private
-    FThreadID: TThreadID;
+    FTcpLockNo, FThreadID: TThreadID;
     FReadInMainThread: boolean;
-    FIOHandler: TIdIOHandler;
     fPeerPort, FPort: TIdPort;
     fPeerIP, FIP: String;
     FClosedForcfullyOrGracefully: boolean;
     FFileAccessBasePath: String;
-    FFullDupLogList, FLogList: TStringlist;
-    FLoggingListLock: TCriticalSection; // For async Log messages
+    // FFullDupLogList, FLogList: TStringlist;
+    // FLoggingListLock: TCriticalSection; // For async Log messages
     FTotalSessionRead: Int64;
     FLogsMissed, FCountFillBufferErrors: integer;
     FLastData: ansistring;
@@ -193,10 +196,13 @@ Type
       out AKey, ANewData: ansistring);
     Procedure RecoverReadPosition(var ABuffer: TIdBytes; ACharsRead: integer;
       out ATransactionSize: Longword; out AKey, ANewData: ansistring);
-    Function IsValid(AStartOffset, ABufNxt: integer; Var ABuffer: TIdBytes;
+    Function IsValid(AStartOffset: integer; Var ABuffer: TIdBytes;
       ACharsRead: integer; out ATransactionSize: Longword;
       out AKey, ANewData: ansistring): boolean;
+    function CheckOutputData(AData: ansistring): ansistring;
   Protected
+    // while testing
+    FRecoveredValidData: boolean;
     FNextWriteBusyDate, FNextReadBusyDate: TTimeSpan;
     FDecWriteCount, FDecReadCount: integer;
     FConnection: TIdTCPConnection;
@@ -208,7 +214,8 @@ Type
     // Keep Last Data
     FNextTransactionData: ansistring;
     FReadDataWaitDiv5: integer;
-    FLastLoggedTimeStampError, FLastDuplexTime, FLastIncoming: TTimeSpan;
+    FLastLoggedTimeStampError, FHoldDuplexTill, FLastFullDplxIncoming
+      : TTimeSpan;
     FCloseOnTimeOut, fFullDuplex: boolean;
     // False except for TISIndyTCPFullDuplexClient
     FRandomKey: ansistring;
@@ -219,7 +226,7 @@ Type
     FOnDestroy: TISIndyTCPEvent;
     FChnlStopWatch: TStopWatch;
     Procedure SyncReturn(AMethod: TThreadMethod); Virtual;
-    function TextThreadDetails: String;
+    // function TextThreadDetails: String;
     function GetIPRemote: String; Virtual;
     function GetPort: TIdPort; Virtual;
     function FillBufferWithLeftOver(Var ABuffer: TIdBytes): integer;
@@ -252,11 +259,16 @@ Type
     function SimpleRemoteAction(const AFunction: ansistring): ansistring;
     Function CheckWriteBusy: boolean; Virtual;
     Function CheckReadBusy: boolean; Virtual;
+    Function LockConnection: boolean;
+    Function LockConnectionSkt(Out ASocket: TIdIOHandlerSocket): boolean;
+    Function LockConnectionCon(Out AConnection: TIdTCPConnection): boolean;
     // function DecodeSafeFileTransferPath(ACmdPlusPath: string): ansistring;
+    Procedure LockConnectionFree;
+    Procedure HandleCoupleSessionDropReferences;
     Procedure ApplicationProcessMessages;
     Procedure SetFullDuplex(Val: boolean); Virtual;
-    procedure AddFullDuplexLogMessage(TextID, AMsg: String);
-    procedure AddLogMessage(ATextID, AMsg: String);
+    // procedure AddFullDuplexLogMessage(TextID, AMsg: String);
+    // procedure AddLogMessage(ATextID, AMsg: String);
     procedure CloseConnection; virtual;
     // TWorkBeginEvent Id Component Do Begin Work
     procedure WorkBeginEvent(ASender: TObject; AWorkMode: TWorkMode;
@@ -288,13 +300,13 @@ Type
     function CallOnLocalSubNet: boolean;
     function TextID: String; Virtual;
     function PortId: String; Virtual;
-    function ReadFullDuplexLogMessage: String;
-    function ReadLogMessage: String;
-    function CloseGracefully(AAlreadyClosed: boolean = False): boolean;
+    // function ReadFullDuplexLogMessage: String;
+    // function ReadLogMessage: String;
+    function CloseIsObjGracefully: boolean;
     Function RecentData(AGap: TTimeSpan): boolean;
     Class function RawToByteArray(AData: RawByteString): TIdBytes;
     Class function StreamAsString(AStrm: Tstream): ansistring;
-    Procedure LogAMessage(AMsg: String); virtual;
+    // Procedure LogAMessage(AMsg: String); virtual;
     // Log a message on the server
     Procedure WorkEnableBeginActionEndBreakpoints;
     // Activates Work Action Functions where you can set breakpoints for this specific object
@@ -302,7 +314,6 @@ Type
     Property Address: String read GetAddress write SetAddress;
     Property Port: TIdPort read GetPort write SetPort;
     Property LocalPort: TIdPort read GetLocalPort;
-    Property IOHandler: TIdIOHandler read FIOHandler;
     Property TcpConnection: TIdTCPConnection read FConnection;
     Property FileAccessBase: String read FFileAccessBasePath
       write SetFileAccessBasePath;
@@ -399,7 +410,6 @@ Type
     Function GetLinkStatus(ALocalPort, ALinkedLocalPort: integer;
       ALinkRef: ansistring; Var Aregistrations: ansistring): TLinkStates;
     Function StringTransaction(aString: String): String;
-    Function Close: boolean;
     Function PollDue: boolean;
     Function Activate: boolean;
     Function CopyLargeServerFileToStream(AStream: Tstream;
@@ -542,7 +552,7 @@ Type
       : TCriticalSection;
     FCurrentQueueOfRequests, FCurrentQueueOfNWRequests, FLockCount: integer;
     fFDDispFrmWriteThread, fReleaseThreads, FOffThreadDestroy: boolean;
-    FOnLogMsg: TISIndyLogEvent;
+    // FOnLogMsg: TISIndyLogEvent;
     // The Read thread loops thru read loop until terminated or read loop returns false
     Function ReadLoop: boolean;
     Function WriteLoop: boolean;
@@ -583,7 +593,7 @@ Type
     // Destroy takes some time as threads need to terminate
     // Use OffThreadDestroy to take this process outside main thread
     // Happens in Rx or TX threads Destroy
-    Procedure LogAMessage(AMsg: String); override;
+    // Procedure LogAMessage(AMsg: String); override;
     Function FullDuplexDispatchNoWait(AData: ansistring;
       AMaxQueue: integer): integer;
     //
@@ -607,7 +617,7 @@ Type
     Class Function RefValueFromConnectionListValue(AListValue: String;
       out IsFree: boolean): ansistring;
     procedure DropThread(AThread: TThread);
-    Property OnLogMsg: TISIndyLogEvent Read FOnLogMsg write FOnLogMsg;
+    // Property OnLogMsg: TISIndyLogEvent Read FOnLogMsg write FOnLogMsg;
     // must not sync with main thread
     Property OnSimpleDuplexRemoteAction: TComandActionAnsi
       read FOnSimpleDuplexRemoteAction write FOnSimpleDuplexRemoteAction;
@@ -831,16 +841,10 @@ Const
   cNoPersonality = 'NO PERSONALITY';
   cEndMarker = 'e~}^';
   cClosing = 'closesocket}~^';
-  // MaxTcpBuffer = 256;
   CVLrgeBusy = 10000000; // Default Busy reporting per hour
   CVListenerBusy = 100000; // Default Busy reporting per hour
 
 Var
-  // Handshake string
-  // Changing This String Value will Restrict Access to
-  // Applications with the same setting
-  // GCountOfConnections: integer; // Base Connections
-  // GlobalCountOfComsObjectTypes: TStringlist;
   GlobalApplicationProcessMessages: Procedure of Object;
   // Set in inititalize
   cDuplexInactiveTime: TTimeSpan; // = 5 / 24 / 60; // 5 minutes
@@ -871,6 +875,10 @@ function CTransactionEnd: AnsiChar; inline; // = '>';
 {$ELSE}
   cApplicationHandshakeCode
     : ansistring = 'Change This String Value to Restrict Access';
+  // Handshake string
+  // Changing This String Value will Restrict Access to
+  // Applications with the same setting
+
   CTransactionStart: AnsiChar = '<';
   CTransactionEnd: AnsiChar = '>';
 {$ENDIF}
@@ -882,7 +890,7 @@ Const
   cTCPClientReadTimeOut = 100; // msecs
   MinTransactionSz = 8;
   cMaxDataChunk = 100000; // 100 KBytes  <> One Megabyte
-  DebugStartKey: TDateTime = 4000.0000;
+  DebugStartKey: TDateTime = 4056.4444;
 
   // SocketAbortTimeout = 5000; // msec
   // StreamTimeout = 5000; // msec
@@ -1078,8 +1086,9 @@ Begin
   Nxt := Length(Result);
   while Idx < Nxt do
   Begin
-    if Result[Idx - 1].TimeRec.FDateTime > Result[Idx].TimeRec.FDateTime then
-      ISIndyUtilsException('ArrayOfMeteredTimes',
+    if (Result[Idx - 1].TimeRec.FDateTime - 0.0000001) > Result[Idx].TimeRec.FDateTime
+    then
+      ISIndyUtilsException('ArrayOfMeteredTimes #Error',
         FormatDateTime('dd mmm hh:nn:ss.zzz', Result[Idx - 1].TimeRec.FDateTime)
         + '>' + FormatDateTime('dd mmm hh:nn:ss.zzz',
         Result[Idx - 1].TimeRec.FDateTime) + ' Data =' + AData);
@@ -1122,6 +1131,12 @@ begin
 Var
   i, Len: integer;
 begin
+  If AWriteBuffer = nil then
+  begin
+    Result := '';
+    Exit;
+  end;
+
   Len := Length(AWriteBuffer);
   SetLength(Result, Len);
   // For i := 1 to Length(AWriteBuffer) do
@@ -1135,11 +1150,18 @@ end;
 function StringFromBuffer(Const ABuffer: array of Byte; AStart, ACount: integer)
   : ansistring; overload;
 var
-  ActCount: integer;
+  ActCount, Len: integer;
 begin
-  ActCount := Length(ABuffer) - AStart;
+  Result := '';
+  Len := Length(ABuffer);
+  If Len < 1 then
+    Exit;
+
+  ActCount := Len - AStart;
+
   if ActCount > ACount then
     ActCount := ACount;
+
   if ActCount > 0 then
   begin
 {$IFDEF NextGen}
@@ -1150,8 +1172,9 @@ begin
 {$ENDIF}
   end
   else
-    Result := '';
+    Exit;
 end;
+{$IFNDEF FPC}
 
 function StringFromBuffer(Const ABuffer: TIdBytes; AStart, ACount: integer)
   : ansistring; overload;
@@ -1160,22 +1183,31 @@ Type
 Var
   LBuffer: TAb;
 Begin
+  Result := '';
+  If Length(ABuffer) < 1 then
+    Exit;
   LBuffer := TAb(ABuffer);
   Result := StringFromBuffer(LBuffer, AStart, ACount);
 End;
+{$ENDIF}
 
-Function BufferPos(ATst: Byte; AStart, BufferSz: integer;
-  ABuffer: array of Byte): integer; Overload;
+Function BufferPosB(ATst: Byte; Var ACurPos: integer; BufferSz: integer;
+  ABuffer: array of Byte): integer;
 Var
   i, Len: integer;
 begin
   Result := -1;
   Len := Length(ABuffer);
   if Len <> BufferSz then
-    ISIndyUtilsException('BufferPos', 'Len<>BufferSz');
-  if BufferSz > 500000 then
-    ISIndyUtilsException('BufferPos', 'BufferSz>500000');
-  i := AStart;
+    ISIndyUtilsException('BufferPosB', IntToStr(Len) + ':Len<>BufferSz:' +
+      IntToStr(BufferSz));
+  if BufferSz > 5000000 then
+    ISIndyUtilsException('BufferPosB', IntToStr(BufferSz) +
+      ':BufferSz>5000000');
+  if (Len <> BufferSz) or (BufferSz > 500000) then
+    Exit;
+
+  i := ACurPos;
   if i < 0 then
     i := 0;
 
@@ -1186,21 +1218,30 @@ begin
     else
       Inc(i);
   End;
+
+  if Result > 0 then
+    if (i < BufferSz - 1) then
+      ACurPos := i + 1
+    else
+      i := 0;
 end;
 
-Function BufferPos(ATst: AnsiChar; AStart, BufferSz: integer;
-  ABuffer: array of Byte): integer; Overload;
+Function BufferPosAC(ATst: AnsiChar; Var AStart: integer; BufferSz: integer;
+  ABuffer: array of Byte): integer;
 Begin
-  Result := BufferPos(Ord(ATst), AStart, BufferSz, ABuffer);
+  Result := BufferPosB(Ord(ATst), AStart, BufferSz, ABuffer);
 End;
 
 function BytesToTextString(const ByteData: array of Byte;
   Const AMaxLenth: integer = 50): ansistring; overload;
 Var
   Len: integer;
-  Data : ansistring;
+  Data: ansistring;
 begin
+  Result := '';
   Len := Length(ByteData);
+  if Len < 1 then
+    Exit;
   if Len > AMaxLenth then
     Len := AMaxLenth;
   Data := StringFromBuffer(ByteData, 0, Len);
@@ -1215,6 +1256,8 @@ Begin
     if AChnl <> nil then
       TISIndyTCPFullDuplexClient(AChnl).OffThreadDestroy(true);
   Except
+    On E: Exception do
+      ISIndyUtilsException('F&Nil', E, 'FreeAndNilDuplexChannel');
   End;
   AChnl := nil;
 End;
@@ -1237,7 +1280,10 @@ Begin
     if AChnl <> nil then
       AChnl.OffThreadDestroy(False);
   Except
+    On E: Exception do
+      ISIndyUtilsException('F&Nil', E, 'FreeAndNilDuplexChannel');
   End;
+
   TObject(pointer(@AChnl)^) := nil;
 End;
 {$ENDIF}
@@ -1728,17 +1774,21 @@ begin
   Result := Active;
 end;
 
-function TISIndyTCPClient.Close: boolean;
-begin
-  if fIdTCPClientCon <> nil then
-    fIdTCPClientCon.Disconnect;
-  WasClosedForcfullyOrGracefully;
-  Result := Not Active;
-end;
-
 procedure TISIndyTCPClient.CloseConnection;
+Var
+  LConnection: TIdTCPConnection;
 begin
-  Close;
+  ApplicationFlagThreadMsg('TISIndyTCPClient.CloseConnection');
+
+  if LockConnectionCon(LConnection) then
+  Begin
+    if LConnection <> fIdTCPClientCon then
+      ApplicationFlagThreadMsg
+        ('TISIndyTCPClient.CloseConnection FConnection <> fIdTCPClientCon')
+    else
+      LConnection.Disconnect;
+  End;
+  WasClosedForcfullyOrGracefully;
 end;
 
 function TISIndyTCPClient.CopyLargeServerFileToStream(AStream: Tstream;
@@ -1803,12 +1853,26 @@ end;
 destructor TISIndyTCPClient.Destroy;
 Var
   Duration: TTimeSpan;
+  Socket: TIdIOHandlerSocket;
+  LConnection: TIdTCPConnection;
 begin
+  FClosingTcpSocket := true;
   Duration := FChnlStopWatch.Elapsed;
+  LConnection := nil;
   Try
     try
-      FConnection := nil;
-      FreeAndNil(fIdTCPClientCon); // Client owns socket connection
+      if LockConnection then
+        Try
+          If LockConnectionSkt(Socket) then
+            Socket.Close;
+          FConnection := nil;
+          LConnection := fIdTCPClientCon; // Localize
+          fIdTCPClientCon := nil;
+        Finally
+          LockConnectionFree;
+        End;
+      // Client owns socket connection
+      LConnection.Free;
       if GblLogAllChlOpenClose then
         ISIndyUtilsException(Self, '#' + 'Closing/Destroy :' + TextID +
           ' After ' + Duration.ToString);
@@ -1817,7 +1881,7 @@ begin
     end;
   Except
     On E: Exception do
-      ISIndyUtilsException(Self, E, 'TISIndyTCPClient.Destroy');
+      ApplicationFlagThreadMsg(Self, E, 'TISIndyTCPClient.Destroy');
   End;
 end;
 
@@ -1848,6 +1912,7 @@ end;
 procedure TISIndyTCPClient.FreeOldSocket(Sender: TObject);
 Var
   SType: string;
+  Socket: TIdIOHandlerSocket;
 begin
   Try
     if Sender Is TObject then
@@ -1860,29 +1925,37 @@ begin
         + TextID);
 
     if Sender <> nil then
-      if (Sender = FConnection) Or (Sender = FIOHandler) Or
-        (Sender = fIdTCPClientCon) then
+      if (Sender = FConnection) Or (Sender = fIdTCPClientCon) then
       Begin
-        ISIndyUtilsException(Self, 'FreeOldSocket closing Existing');
-        if FConnection is TIsTrackIdTCPClientConnection then
-          TIsTrackIdTCPClientConnection(FConnection).FOwnerTCPBase := nil;
-        FConnection := nil;
-        FIOHandler := nil;
-        if fIdTCPClientCon <> nil then
-        begin
-          fIdTCPClientCon.OnDisconnected := nil;
-          fIdTCPClientCon := nil;
-        end;
+        if LockConnection then
+          Try
+            ISIndyUtilsException(Self,
+              'FreeOldSocket closing Existing Channel');
+            if FConnection is TIsTrackIdTCPClientConnection then
+              TIsTrackIdTCPClientConnection(FConnection).FOwnerTCPBase := nil;
+            FConnection := nil;
+            if fIdTCPClientCon <> nil then
+            begin
+              fIdTCPClientCon.OnDisconnected := nil;
+              fIdTCPClientCon := nil;
+            end;
+          Finally
+            LockConnectionFree;
+          End
+        Else
+          ApplicationFlagThreadMsg(Self, 'No Lock FreeOldSocket');
         Free;
         Exit;
       End;
 
     if (Sender is TIdIOHandler) or (Sender is TIdTCPConnection) then
       Try
+        ApplicationFlagThreadMsg(Sender, 'FreeOldSocket Sender.Free ' + SType);
         Sender.Free
       Except
         On E: Exception do
-          ISIndyUtilsException(Self, E, 'FreeOldSocket Sender.Free' + SType);
+          ApplicationFlagThreadMsg(Sender, E,
+            'FreeOldSocket Sender.Free' + SType);
       End
     else
       ISIndyUtilsException(Self, 'FreeOldSocket Bad Type:=' + SType);
@@ -1893,11 +1966,13 @@ begin
 end;
 
 function TISIndyTCPClient.GetActive: boolean;
+Var
+  Socket: TIdIOHandlerSocket;
 begin
   Try
     Result := False;
-    if (fIdTCPClientCon <> nil) and (fIdTCPClientCon.IOHandler <> nil) then
-      Result := fIdTCPClientCon.Connected;
+    if LockConnectionSkt(Socket) then
+      Result := Socket.Connected;
   Except
     On E: Exception do
     Begin
@@ -2151,7 +2226,6 @@ begin
 {$ENDIF}
 {$ENDIF}
     SendTransaction(SPt, Rst, Key, s);
-
     Result := Key = cStartConnection;
     if s = '' then
       raise EExceptionIsComsNotExpected.Create('No Response From ' + fPeerIP);
@@ -2162,6 +2236,8 @@ begin
 {$ENDIF}
     if Rst = NewCon then
     Begin
+      ss := s;
+      uniquestring(s);
 {$IFDEF NEXTGEN}
       Encrypt(s.Length, pointer(s), SizeOf(StartKeyCode), @StartKeyCode);
 {$ELSE}
@@ -2177,7 +2253,6 @@ begin
       raise EExceptionIsComsNotExpected.Create(s);
 
     FNotAuthorized := False;
-
 {$IFDEF NEXTGEN}
     case Char(s[0]) of
 {$ELSE}
@@ -2191,8 +2266,22 @@ begin
         FEncrypted := False;
     else
       Begin
-        s := s + '   Enc:' + FormatDateTime('dd mm yy', StartKeyCode);
+        // IfDef ForceBadConnectionString
+        s := ss;
+        StartKeyCode := 1.676669;
+        // From TISIndyTCPSvrSession.AcceptStart.TestConnectionData
         uniquestring(s);
+{$IFDEF NEXTGEN}
+        Encrypt(s.Length, pointer(s), SizeOf(StartKeyCode), @StartKeyCode);
+{$ELSE}
+        Encrypt(Length(s), @s[1], SizeOf(StartKeyCode), @StartKeyCode);
+{$ENDIF}
+        if s[1] = 'U' then
+          s := 'Bad Server Application Handshake Code ::' +
+            cApplicationHandshakeCode
+        else
+          s := s + '   Enc:' + FormatDateTime('dd mm yy', StartKeyCode);
+        ISIndyUtilsException(Self, '#' + s);
         Raise Exception.Create(s);
       End;
     end; // case
@@ -2340,7 +2429,7 @@ begin
     fInReconnect := true;
     FDoNotTryAgainUntil := 0.0;
     if Active then
-      Close;
+      CloseConnection;
     try
       { Encrypt(Length(s) - 3, @s[4], Length(AEncryptKey), @AEncryptKey[1]);
         Result := CTransactionStart + Txn.a + Txn.b + Txn.c + Txn.d + s + CTransactionEnd; }
@@ -2592,13 +2681,13 @@ begin
     Activate;
   End
   Else
-    Close;
+    CloseConnection;
 end;
 
 procedure TISIndyTCPClient.SetAddress(const Value: String);
 begin
   if Active then
-    Close;
+    CloseConnection;
   fServerAddress := Value;
   fPeerIP := Value;
   fCreatedViaStartAccess := False;
@@ -2615,7 +2704,7 @@ end;
 procedure TISIndyTCPClient.SetPort(const Value: TIdPort);
 begin
   if Active then
-    Close;
+    CloseConnection;
   fServerPort := Value;
   fPeerPort := Value;
   fCreatedViaStartAccess := False;
@@ -2770,21 +2859,26 @@ end;
 procedure TISIndyTCPClient.WasClosedForcfullyOrGracefully;
 begin
   Try
-    Try
-      FIOHandler := nil;
-      if FConnection <> nil then
-        if fIdTCPClientCon <> nil then
-          FreeAndNil(fIdTCPClientCon);
-      FConnection := nil;
-    Except
-      On E: Exception do
-      begin
-        ISIndyUtilsException(Self, E,
-          'TISIndyTCPClient.WasClosedForcfullyOrGracefully::' + TextID);
-        fIdTCPClientCon := nil;
-      end;
-    End;
-    FConnection := nil;
+    if LockConnection then
+      Try
+        Try
+          FConnection := nil;
+          if fIdTCPClientCon <> nil then
+            FreeAndNil(fIdTCPClientCon);
+        Except
+          On E: Exception do
+          begin
+            ISIndyUtilsException(Self, E,
+              'TISIndyTCPClient.WasClosedForcfullyOrGracefully::' + TextID);
+            ApplicationFlagThreadMsg('WasClosedForcfullyOrGracefully ' +
+              E.Message);
+            fIdTCPClientCon := nil;
+          end;
+        End;
+        FConnection := nil;
+      Finally
+        LockConnectionFree;
+      End;
   Finally
     inherited;
   End;
@@ -2842,54 +2936,60 @@ end;
 
 { FISIndyTCPBase }
 
-procedure TISIndyTCPBase.AddFullDuplexLogMessage(TextID, AMsg: String);
-begin
-  try
-    if fFullDuplex then
-    Begin
-      If FLoggingListLock.TryEnter then
-        Try
-          If FFullDupLogList = nil then
-            FFullDupLogList := TStringlist.Create;
-          If FFullDupLogList.Count < 100 then
-            FFullDupLogList.Add(TextID + FormatDateTime(' : ddd hh:nn:ss : ',
-              Now) + AMsg)
-        Finally
-          FLoggingListLock.Release;
-        End
-      Else
-        Inc(FLogsMissed);
-    end;
-  Except
-  end;
-end;
+// procedure TISIndyTCPBase.AddFullDuplexLogMessage(TextID, AMsg: String);
+// begin
+// try
+// if fFullDuplex then
+// Begin
+// If FLoggingListLock.TryEnter then
+// Try
+// If FFullDupLogList = nil then
+// FFullDupLogList := TStringlist.Create;
+// If FFullDupLogList.Count < 100 then
+// FFullDupLogList.Add(TextID + FormatDateTime(' : ddd hh:nn:ss : ',
+// Now) + AMsg)
+// Finally
+// FLoggingListLock.Release;
+// End
+// Else
+// Inc(FLogsMissed);
+// end;
+// Except
+// end;
+// end;
 
-procedure TISIndyTCPBase.AddLogMessage(ATextID, AMsg: String);
-begin
-  Try
-    If FLoggingListLock.TryEnter then
-      try
-        If FLogList = nil then
-          FLogList := TStringlist.Create;
-        If FLogList.Count < 100 then
-          FLogList.Add(ATextID + FormatDateTime(' : ddd hh:nn:ss : ',
-            Now) + AMsg)
-      finally
-        FLoggingListLock.Release;
-      end
-    else
-      Inc(FLogsMissed);
-  Except
-    on E: Exception do
-      ISIndyUtilsException(Self, E, '# AddLogMessage')
-  end;
-end;
+// procedure TISIndyTCPBase.AddLogMessage(ATextID, AMsg: String);
+// begin
+// Try
+// If FLoggingListLock.TryEnter then
+// try
+// If FLogList = nil then
+// FLogList := TStringlist.Create;
+// If FLogList.Count < 100 then
+// FLogList.Add(ATextID + FormatDateTime(' : ddd hh:nn:ss : ',
+// Now) + AMsg)
+// finally
+// FLoggingListLock.Release;
+// end
+// else
+// Inc(FLogsMissed);
+// Except
+// on E: Exception do
+// ISIndyUtilsException(Self, E, '# AddLogMessage')
+// end;
+// end;
 
 procedure TISIndyTCPBase.ApplicationProcessMessages;
 begin
-  if (TThread.CurrentThread.ThreadID = MainThreadID) then
-    if Assigned(GlobalApplicationProcessMessages) then
-      GlobalApplicationProcessMessages;
+  Try
+    if (TThread.CurrentThread.ThreadID = MainThreadID) then
+      if Assigned(GlobalApplicationProcessMessages) then
+        GlobalApplicationProcessMessages;
+  Except
+    On E: Exception do
+      ApplicationFlagThreadMsg(Self, E,
+        'TISIndyTCPBase.ApplicationProcessMessages');
+  End;
 end;
 
 function TISIndyTCPBase.BindingIsLocal(ABind: TIdSocketHandle): boolean;
@@ -2934,19 +3034,46 @@ begin
 end;
 
 function TISIndyTCPBase.CallOnLocalSubNet: boolean;
+Var
+  Socket: TIdIOHandlerSocket;
 begin
   Result := False;
-  if FConnection <> nil then
-    if FConnection.Socket <> nil then
-      Result := BindingIsLocal(FConnection.Socket.Binding)
+  if LockConnectionSkt(Socket) then
+    Result := BindingIsLocal(Socket.Binding)
 end;
 
 function TISIndyTCPBase.CheckConnection: boolean;
+Var
+  Socket: TIdIOHandlerSocket;
 begin
-  if IOHandler <> nil then
-    Result := IOHandler.Connected
-  Else
-    Result := False;
+  Result := False;
+  if LockConnectionSkt(Socket) then
+    Result := Socket.Connected;
+end;
+
+function TISIndyTCPBase.CheckOutputData(AData: ansistring): ansistring;
+// Confirms Format of a Transaction Packet
+Var
+  DataLen: integer;
+begin
+  Result := '';
+  DataLen := Length(AData);
+  if DataLen < 9 then
+  begin
+    Result := 'Transaction too small::' + AData;
+    Exit;
+  end;
+  if AData[1] <> '<' then
+  begin
+    Result := 'Bad Start ::' + Copy(AData, 1, 10);
+    Exit;
+  end;
+  if AData[DataLen] <> '>' then
+  begin
+    Result := 'Bad End ::' + Copy(AData, 1, 10) + '.........' +
+      Copy(AData, DataLen - 8, 10);
+    Exit;
+  end;
 end;
 
 function TISIndyTCPBase.CheckReadBusy: boolean;
@@ -2977,78 +3104,55 @@ begin
   if FDecWriteCount < 0 then
   begin
     TM := FChnlStopWatch.Elapsed;
-    FDecWriteCount := CVLrgeBusy;
+    FDecWriteCount := CVLrgeBusy; // Send Transactions Per Hour
     if FNextWriteBusyDate > TM then
       Result := true;
     FNextWriteBusyDate := TM.Add(TTimeSpan.FromHours(1));
   end;
   if Result then
     ISIndyUtilsException(Self, '#CheckWriteBusy True Write more than ' +
-      IntToStr(CVLrgeBusy) + ' per hour ' + TextID);
+      IntToStr(CVLrgeBusy) + ' per hour ' + PortId);
 end;
 
 procedure TISIndyTCPBase.CloseConnection;
+Var
+  Socket: TIdIOHandlerSocket;
 begin
-  If Assigned(FIOHandler) then
-    if FIOHandler.Connected then
-      FIOHandler.Close; // Gracefully;
+  ApplicationFlagThreadMsg('TISIndyTCPBase.CloseConnection');
+  if LockConnectionSkt(Socket) then
+  Begin
+    if Socket.Connected then
+      Socket.Close; // Gracefully;
+  end;
+
+  if LockConnectionSkt(Socket) then
+    FreeAndNil(FConnection);
+
+  if GblLogAllChlOpenClose then
+    ISIndyUtilsException(Self, '#TISIndyTCPBase.Close Connection ::' + TextID);
 end;
 
-function TISIndyTCPBase.CloseGracefully(AAlreadyClosed
-  : boolean = False): boolean;
+function TISIndyTCPBase.CloseIsObjGracefully: boolean;
 begin
+  ApplicationFlagThreadMsg('TISIndyTCPBase.CloseIsObjGracefully ' + TextID);
   Result := False;
-  if AAlreadyClosed then
-  begin
-    if GblLogAllChlOpenClose then
-      ISIndyUtilsException(Self,
-        '#TISIndyTCPBase.CloseGracefully with AAlreadyClosed ::' + TextID);
-    if FConnection <> nil then
-      SetConnection(nil);
-    FConnection := nil;
-    FIOHandler := nil;
-    FClosedForcfullyOrGracefully := true;
-  end
-  else
+  Try
     Try
-      If FConnection <> nil then
-      Begin
-        if FIOHandler = FConnection.IOHandler then
-          FIOHandler := nil;
-        If FConnection.Connected then
-        begin
-          FConnection.Disconnect(true);
-          if GblLogAllChlOpenClose then
-            ISIndyUtilsException(Self,
-              '#TISIndyTCPBase.CloseGracefully with Connection ::' + TextID);
-          // sleep(1000);
-        end;
-        FConnection := nil;
-      End
-      Else if GblLogAllChlOpenClose then
-        ISIndyUtilsException(Self,
-          '#TISIndyTCPBase.CloseGracefully with nil Connection ::' + TextID);
-      Result := (IOHandler = nil);
-
-      if IOHandler <> nil then
-        Try
-          Result := true;
-          FIOHandler.CloseGracefully;
-          FIOHandler := nil;
-        Except
-          On E: Exception do
-            ISIndyUtilsException(Self, E, 'FIOHandler.CloseGracefully');
-        end;
+      CloseConnection;
       SetConnection(nil);
-      WasClosedForcfullyOrGracefully;
+      Result := true;
     Except
       On E: Exception do
-      begin
-        FIOHandler := nil;
-        FConnection := nil;
-        ISIndyUtilsException(Self, E, '#TISIndyTCPBase.CloseGracefully');
-      end;
-    End;
+        ISIndyUtilsException(Self, E, 'TISIndyTCPBase.CloseIsObjGracefully');
+    end;
+    WasClosedForcfullyOrGracefully;
+  Except
+    On E: Exception do
+    begin
+      FConnection := nil;
+      ISIndyUtilsException(Self, E, '#TISIndyTCPBase.CloseIsObjGracefully');
+    end;
+  End;
 End;
 
 constructor TISIndyTCPBase.Create;
@@ -3060,7 +3164,7 @@ begin
       // FChnlStopWatch.Start
     else
       ISIndyUtilsException(Self, 'Not FChnlStopWatch.IsHighResolution');
-    FLastIncoming := FChnlStopWatch.Elapsed;
+    FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
     FClosingTcpSocket := False;
     if Not FConnectionCounted then
     Begin
@@ -3069,7 +3173,7 @@ begin
       FConnectionCounted := true;
       if Assigned(GlobalCountOfComsObjectTypes) then
         GlobalCountOfComsObjectTypes.CountComsTypes(Self, true);
-      FLoggingListLock := TCriticalSection.Create;
+      // FLoggingListLock := TCriticalSection.Create;
     End;
     FDecWriteCount := CVLrgeBusy;
     FDecReadCount := CVLrgeBusy;
@@ -3078,6 +3182,7 @@ begin
       ISIndyUtilsException(Self, E, 'TISIndyTCPBase Create');
   End;
   Inherited;
+  TSingletonObjTimeSpanRecording.RecordObjectOnCreate(Self);
 end;
 
 procedure TISIndyTCPBase.DecodeIndyTCPBaseTransStart(const ABuffer
@@ -3095,6 +3200,7 @@ procedure TISIndyTCPBase.DecodeIndyTCPBaseTransStart(const ABuffer
     i: integer;
 
   Begin
+    TxtBuffer := nil;
     i := Length(ABuffer);
     if i > 8 then
       i := 8;
@@ -3128,6 +3234,8 @@ begin
     AKey := '';
     ANewData := '';
     ATransactionSize := 0;
+    // If (Abuffer = nil) then
+    // Exit;
     if Length(ABuffer) < 1 then
       Exit;
 
@@ -3240,20 +3348,24 @@ end;
 
 procedure TISIndyTCPBase.DecWaitAndProcess;
 begin
+  Dec(FReadWaitCount);
   if FReadWaitCount > 0 then
     if FReadInMainThread then
       ApplicationProcessMessages;
-  Dec(FReadWaitCount);
 end;
 
 destructor TISIndyTCPBase.Destroy;
 Var
   LOnDestroy: TISIndyTCPEvent;
   Msg: String;
+  LoggingListCount: integer;
 begin
+  FClosingTcpSocket := true;
+  LoggingListCount := 50;
   if GblLogAllChlOpenClose then
     ISIndyUtilsException(Self, '#' + 'Enter TISIndyTCPBase Destroy >>' + TextID
-      + #13#10'Object Duration ' + FChnlStopWatch.Elapsed.ToString);
+      + #13#10'Object Duration ' + FChnlStopWatch.Elapsed.ToString +
+      #13#10'Thread =' + IntToStr(TThread.CurrentThread.ThreadID));
   try
     TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
       FChnlStopWatch.Elapsed);
@@ -3261,13 +3373,21 @@ begin
       LOnDestroy := FOnDestroy;
       FOnDestroy := nil;
       If Assigned(LOnDestroy) then
-        LOnDestroy(Self);
-      if FLoggingListLock <> nil then
-        While not FLoggingListLock.TryEnter do
-        Begin
-          Sleep(1000);
-          ISIndyUtilsException(Self, '#' + 'FLoggingListLock.TryEnter')
-        End;
+        try
+          LOnDestroy(Self);
+        Except
+          On E: Exception do
+            ISIndyUtilsException(Self, E, 'Base LOnDestroy(Self)');
+        end;
+      // if FLoggingListLock <> nil then
+      // While (LoggingListCount > 0) and not FLoggingListLock.TryEnter do
+      // Begin
+      // Sleep(1000);
+      // ISIndyUtilsException(Self, '#' + 'FLoggingListLock.TryEnter');
+      // Dec(LoggingListCount);
+      // End;
+      // FreeAndNil(FLoggingListLock);
+
       Dec(GCountOfConnections);
 
       if Assigned(GlobalCountOfComsObjectTypes) then
@@ -3280,18 +3400,7 @@ begin
         FConnection := nil;
       end;
 
-      if FOwnsCoupledSession then
-        Try
-          if FCoupledSession is TISIndyTCPFullDuplexClient then
-            FreeAndNilDuplexChannel(pointer(FCoupledSession))
-          else
-            FreeAndNil(FCoupledSession);
-        Except
-          On E: Exception do
-          begin
-            ISIndyUtilsException(Self, E, '#' + 'Destroy FOwnsCoupledSession');
-          End;
-        End;
+      HandleCoupleSessionDropReferences;
 {$IFDEF fpc}
 {$ELSE}
       // try
@@ -3302,15 +3411,13 @@ begin
       // Except
       // end;
 {$ENDIF}
-      FIOHandler := nil;
-      FreeAndNil(FFullDupLogList);
-      FreeAndNil(FLogList);
-      FreeAndNil(FLoggingListLock);
+      // FreeAndNil(FFullDupLogList);
+      // FreeAndNil(FLogList);
+      FreeAndNil(FTCPLock);
     Except
       On E: Exception do
       begin
         ISIndyUtilsException(Self, E, '#' + 'TISIndyTCPBase.Destroy');
-        FIOHandler := nil;
       end;
     end;
   finally
@@ -3318,12 +3425,15 @@ begin
       GlobalSelectDebugChn := nil;
     inherited;
   end;
+
   // NOTHING OWNED HERE???
   if GblLogAllChlOpenClose then
   Begin
-    Msg := '#' + 'Exit TISIndyTCPBase Destroy >>' + TextID +
-      #13#10'Object Duration ' + FChnlStopWatch.Elapsed.ToString;
-    ISIndyUtilsException(Self, Msg);
+    Msg := 'Exit TISIndyTCPBase Destroy >>' + TextID + #13#10'Object Duration '
+      + FChnlStopWatch.Elapsed.ToString + #13#10'Thread =' +
+      IntToStr(TThread.CurrentThread.ThreadID);
+    WritelnIfPossible(Msg);
+    ISIndyUtilsException(Self, '#' + Msg);
   End;
 end;
 
@@ -3336,7 +3446,7 @@ begin
   ErrorMsg := '';
 
   if AData <> '' then
-    FLastDuplexTime := FLastIncoming + cDuplexInactiveTime;
+    FHoldDuplexTill := FLastFullDplxIncoming + cDuplexInactiveTime;
 
   Try
     if Assigned(FCoupledSession) then
@@ -3407,6 +3517,7 @@ Var
   LenSv, i { , DataCount } : integer;
   buffer: TIdBytes;
 begin
+  ABuffer := nil; // Reset Buffer
   Result := 0;
 {$IFDEF NextGen}
   LenSv := FNextTransactionData.Length;
@@ -3447,7 +3558,8 @@ function TISIndyTCPBase.FullDuplexDispatch(AData: ansistring; AKey: ansistring
 {$ENDIF} ): boolean;
 var
   ToSend, Sent: LongInt;
-  DataToGo: ansistring;
+  DataToGo, Tst: ansistring;
+  Socket: TIdIOHandlerSocket;
 {$IFDEF NEXTGEN}
   DebugString: String;
 {$ENDIF}
@@ -3464,11 +3576,14 @@ begin
 begin
 {$ENDIF}
   Result := False;
+
+  If FClosingTcpSocket then
+    Exit;
+
   if Not fFullDuplex then
     SetFullDuplex(true);
-  // Non Blocking transaction On full Duplex Session Starts ReadThread
   if AData <> '' then
-    FLastDuplexTime := FChnlStopWatch.Elapsed + cDuplexInactiveTime;
+    FHoldDuplexTill := FChnlStopWatch.Elapsed + cDuplexInactiveTime;
   // Can send '' as ping
   If FClosedForcfullyOrGracefully then
     Exit;
@@ -3514,30 +3629,36 @@ begin
       Exit;
     End;
 
-    If FConnection <> nil Then
-    Begin
-      if FConnection.Connected then
+    If not FClosingTcpSocket Then
+      If FConnection <> nil Then
       Begin
-        Sent := Write(DataToGo);
-        Result := Sent = ToSend;
-        if Not Result then
-          ISIndyUtilsException(Self, 'FullDuplexDispatch #Duplex Data Write=' +
-            IntToStr(Sent) + ' <> To Send=' + IntToStr(ToSend) + ' ' + TextID);
+        if LockConnectionSkt(Socket) then
+        Begin
+          Tst := CheckOutputData(DataToGo);
+          if Tst <> '' then
+            ISIndyUtilsException(Self, 'Bad Data ' + TextID + ' >> ' + Tst);
+          Sent := Write(DataToGo);
+          Result := Sent = ToSend;
+          if Not Result then
+            ISIndyUtilsException(Self, 'FullDuplexDispatch #Duplex Data Write='
+              + IntToStr(Sent) + ' <> To Send=' + IntToStr(ToSend) + ' '
+              + TextID);
+        End
+        Else
+        begin
+          ISIndyUtilsException(Self, '#FullDuplexDispatch Not Connected '
+            + TextID);
+          Result := False;
+          FClosedForcfullyOrGracefully := true;
+        end;
       End
       Else
-      begin
-        ISIndyUtilsException(Self, '#FullDuplexDispatch Not Connected '
+      Begin
+        ISIndyUtilsException(Self, '#FullDuplexDispatch No Connection '
           + TextID);
         Result := False;
         FClosedForcfullyOrGracefully := true;
       end;
-    End
-    Else
-    Begin
-      ISIndyUtilsException(Self, '#FullDuplexDispatch No Connection ' + TextID);
-      Result := False;
-      FClosedForcfullyOrGracefully := true;
-    end;
   Except
     On E: Exception do
     Begin
@@ -3595,6 +3716,34 @@ begin
   Result := fPeerPort;
 end;
 
+procedure TISIndyTCPBase.HandleCoupleSessionDropReferences;
+begin
+  if FOwnsCoupledSession then
+    Try
+      if FCoupledSession is TISIndyTCPFullDuplexClient then
+        FreeAndNilDuplexChannel(pointer(FCoupledSession))
+      else
+        FreeAndNil(FCoupledSession);
+    Except
+      On E: Exception do
+      begin
+        ApplicationFlagThreadMsg(Self, E, ' Destroy FOwnsCoupledSession');
+        ISIndyUtilsException(Self, E, '#' + 'Destroy FOwnsCoupledSession');
+      End;
+    End
+  Else if FCoupledSession <> nil then
+    try
+      FCoupledSession.FCoupledSession := nil;
+      FCoupledSession := nil;
+    Except
+      On E: Exception do
+      begin
+        ApplicationFlagThreadMsg(Self, E, ' Drop UnOwned FCoupledSession');
+        ISIndyUtilsException(Self, E, '#' + 'Drop UnOwned FCoupledSession');
+      End;
+    End;
+end;
+
 function TISIndyTCPBase.IsUploadAcceptTempFile(AFileName: string): boolean;
 Var
   Tst: String;
@@ -3604,17 +3753,28 @@ begin
   Result := Pos(Tst, Lowercase(AFileName)) = 1;
 end;
 
-function TISIndyTCPBase.IsValid(AStartOffset, ABufNxt: integer;
-  var ABuffer: TIdBytes; ACharsRead: integer; out ATransactionSize: Longword;
+function TISIndyTCPBase.IsValid(AStartOffset: integer; var ABuffer: TIdBytes;
+  ACharsRead: integer; out ATransactionSize: Longword;
   out AKey, ANewData: ansistring): boolean;
 Var
   LKey, NewBufferStr: ansistring;
   LTransactionSize: Longword;
+  // while testing
+  BufferSz: integer;
+  Len: integer;
 begin
   Result := False;
+
+  // while testing
+  FRecoveredValidData := False;
+
   ANewData := '';
   AKey := '';
-  if AStartOffset + 8 > Length(ABuffer) then
+  if ABuffer = nil then
+    Exit;
+
+  Len := Length(ABuffer);
+  if AStartOffset + 8 > Len then
     Exit;
   // <1234KEYADATAADATA
   LKey := AnsiChar(ABuffer[AStartOffset]) + AnsiChar(ABuffer[AStartOffset + 1])
@@ -3645,6 +3805,10 @@ begin
         SetLength(ABuffer, 0) // Contained in FNextTransactionData.
       Else
         raise EExceptionIsComsNotExpected.Create('IsValid Leftover 1 not "<"');
+
+      // while testing
+      FRecoveredValidData := true;
+
     End
     Else
     Begin
@@ -3656,38 +3820,156 @@ begin
       ABuffer := TIdBytes(BufferFromString(NewBufferStr, 1 + ZSISOffset,
         Length(NewBufferStr)));
       AKey := LKey;
+
+      // while testing
+      FRecoveredValidData := true;
     End;
+
+  // while testing
+  BufferSz := Length(ABuffer);
 end;
 
 function TISIndyTCPBase.LocalAddress: ansistring;
+Var
+  Socket: TIdIOHandlerSocket;
 begin
   Result := '';
-  if FConnection <> nil then
-    if FConnection.Socket <> nil then
-      Result := FConnection.Socket.Binding.IP;
+  if LockConnectionSkt(Socket) then
+    Result := Socket.Binding.IP;
 end;
 
-procedure TISIndyTCPBase.LogAMessage(AMsg: String);
-// Log a message on the server
+function TISIndyTCPBase.LockConnection: boolean;
+Var
+  LoopCount: integer;
+begin
+  Result := False;
+  if FTCPLock = nil then
+    FTCPLock := TCriticalSection.Create;
+  Result := FTCPLock.TryEnter;
 
+  if Not Result then
+  Begin
+    LoopCount := 5;
+    while Not Result And (LoopCount > 0) do
+    Begin
+{$IFDEF Debug}
+      if LoopCount < 2 then
+        ApplicationFlagThreadMsg(Self, ' Unable to Lock TCP ' + FBasePortID +
+          ' Count=' + IntToStr(LoopCount));
+{$ENDIF}
+      Dec(LoopCount);
+      Sleep(200);
+      Result := FTCPLock.TryEnter;
+      if Result then
+        if LoopCount < 2 then
+          ApplicationFlagThreadMsg(Self, ' Resolved Lock TCP ' + FBasePortID);
+    End;
+  End;
+
+  if Not Result then
+    ApplicationFlagThreadMsg(Self, ' ************Unable to Lock TCP ' +
+      ' Is Locked By ' + IntToStr(FTcpLockNo))
+  Else
+    FTcpLockNo := TThread.CurrentThread.ThreadID;
+end;
+
+function TISIndyTCPBase.LockConnectionCon(out AConnection
+  : TIdTCPConnection): boolean;
+// Returns FConnection is true if connected
+Var
+  Socket: TIdIOHandlerSocket;
+begin
+  Result := False;
+  AConnection := nil;
+  if FConnection = nil then
+    Exit;
+  If LockConnection then
+    try
+      AConnection := FConnection;
+      Result := LockConnectionSkt(Socket);
+    Finally
+      LockConnectionFree;
+    End
+  Else
+    ApplicationFlagThreadMsg(Self, 'TCP  Con Lock Failed ' + FBasePortID);
+end;
+
+procedure TISIndyTCPBase.LockConnectionFree;
 begin
   Try
-    if fFullDuplex then
-      AddFullDuplexLogMessage(TextID, AMsg)
-    else
-      AddLogMessage(TextID, AMsg);
-    // Log messages may be syncronised causing lock up
-    // Else if Assigned(FOnLogMsg) then
-    // FOnLogMsg(TextID, AMsg);
-    if GlobalTCPLogAllData then
-      ISIndyUtilsException(Self, '#' + 'LogAMessage ' + TextID +
-        ' Msg:' + AMsg);
-
+    FTCPLock.Release;
+{$IFDEF Debug}
+    // ApplicationFlagThreadMsg(Self, ' Exit Lock TCP ' + FBasePortID);
+{$ENDIF}
   Except
     On E: Exception do
-      ISIndyUtilsException(Self, E, 'LogAMessage ');
-  end;
+      ApplicationFlagThreadMsg(Self, E, ' Exit Lock TCP ' + FBasePortID);
+  End;
 end;
+
+function TISIndyTCPBase.LockConnectionSkt(out ASocket
+  : TIdIOHandlerSocket): boolean;
+// Returns IoHandler and is true if connected
+begin
+  Result := False;
+  ASocket := nil;
+
+  if FConnection = nil then
+  begin
+    FConnected := False;
+    Exit;
+  end;
+  Try
+    if LockConnection then
+      Try
+        if FConnection <> nil then
+          Try
+            ASocket := TIdIOHandlerSocket(FConnection.IOHandler);
+            if ASocket <> nil then
+              Result := ASocket.Connected;
+            FConnected := Result;
+          Except
+            On E: EAccessViolation do
+            Begin
+              FConnection := nil;
+              FConnected := False;
+              ApplicationFlagThreadMsg(Self, E, 'TCP SktLock Failed to Connect'
+                + FBasePortID);
+            End;
+            On E: Exception do
+              ApplicationFlagThreadMsg(Self, E, 'TCP SktLock Failed to Connect'
+                + FBasePortID);
+          end;
+      Finally
+        LockConnectionFree;
+      End
+    Else
+      ApplicationFlagThreadMsg(Self, 'TCP SktLock Failed ' + PortId);
+  Except
+    On E: Exception do
+      ApplicationFlagThreadMsg(Self, E, 'TCP SktLock Failed ' + PortId);
+  End;
+end;
+
+// procedure TISIndyTCPBase.LogAMessage(AMsg: String);
+//
+// begin
+// Try
+// if fFullDuplex then
+// AddFullDuplexLogMessage(TextID, AMsg)
+// else
+// AddLogMessage(TextID, AMsg);
+// Log messages may be syncronised causing lock up
+// Else if Assigned(FOnLogMsg) then
+// FOnLogMsg(TextID, AMsg);
+// if GlobalTCPLogAllData then
+// ISIndyUtilsException(Self, '#' + 'LogAMessage ' + TextID +
+// ' Msg:' + AMsg);
+// Except
+// On E: Exception do
+// ISIndyUtilsException(Self, E, 'LogAMessage ');
+// end;
+// end;
 
 procedure TISIndyTCPBase.LogTimeStampFail(AData: ansistring; AMessage: string);
 var
@@ -3718,15 +4000,17 @@ end;
 procedure TISIndyTCPBase.ProcessHeaderWithLeftOver(Var ABuffer: TIdBytes);
 Var
   FromLeftOver: integer;
+  Socket: TIdIOHandlerSocket; // Localize
 begin
+  ABuffer := nil; // Reset Buffer
   FromLeftOver := FillBufferWithLeftOver(ABuffer);
   if FromLeftOver < MinTransactionSz + 1 then
   Begin
     ISIndyUtilsException(Self, 'Small leftover FNextTransactionData is'#13#10 +
       BytesToTextString(FNextTransactionData));
     Try
-      FConnection.Socket.ReadBytes(ABuffer,
-        (MinTransactionSz + 1 - FromLeftOver), true);
+      if LockConnectionSkt(Socket) then
+        Socket.ReadBytes(ABuffer, (MinTransactionSz + 1 - FromLeftOver), true);
     Except
       On E: EIdReadTimeout do
       Begin
@@ -3737,27 +4021,39 @@ begin
       begin
         ISIndyUtilsException(Self, ECg, 'ProcessHeaderWithLeftOver Ecg '
           + PortId);
+        WasClosedForcfullyOrGracefully;
+        FConnected := False;
         FConnection := nil;
       end;
       On EIdE: EIdException do
       begin
         ISIndyUtilsException(Self, EIdE, 'ProcessHeaderWithLeftOver EIdE '
           + PortId);
-        CloseGracefully;
+        CloseIsObjGracefully;
         FConnection := nil;
+        FConnected := False;
       end;
       On EE: Exception do
+      begin
         ISIndyUtilsException(Self, EE, 'ProcessHeaderWithLeftOver EE '
           + PortId);
+        CloseIsObjGracefully;
+        FConnection := nil;
+        FConnected := False;
+      end;
     End;
   End;
 end;
 
 procedure TISIndyTCPBase.ProcessHeaderWithoutLeftOver(Var ABuffer: TIdBytes);
+Var
+  Socket: TIdIOHandlerSocket; // Localize
 begin
   Try
+    ABuffer := nil; // Reset Buffer
     // SetLength(ABuffer,0); done by Apend=false in readbytes
-    FConnection.Socket.ReadBytes(ABuffer, MinTransactionSz + 1, False);
+    if LockConnectionSkt(Socket) then
+      Socket.ReadBytes(ABuffer, MinTransactionSz + 1, False);
     // +1 to get >
   Except
     On E: EIdReadTimeout do
@@ -3769,18 +4065,27 @@ begin
     begin
       ISIndyUtilsException(Self, ECg, '#ProcessHeader WithoutLeftOver Ecg '
         + PortId);
-      CloseGracefully(true);
+      WasClosedForcfullyOrGracefully;
       FConnection := nil;
+      FConnected := False;
     end;
     On EIdE: EIdException do
     begin
       ISIndyUtilsException(Self, EIdE, '#ProcessHeader WithoutLeftOver EIdE '
         + PortId);
-      CloseGracefully;
+      CloseIsObjGracefully;
       FConnection := nil;
+      FConnected := False;
     end;
     On EE: Exception do
+    begin
       ISIndyUtilsException(Self, EE, '#ProcessHeader WithoutLeftOver EE');
+      // ISIndyUtilsException(Self,'#ProcessHeader WithoutLeftOver EIdE '
+      // + PortId);
+      CloseIsObjGracefully;
+      FConnection := nil;
+      FConnected := False;
+    end;
   End;
 end;
 
@@ -3848,6 +4153,7 @@ var
   NewData: ansistring;
   ShouldClose: boolean;
   ss: ansistring;
+  Socket: TIdIOHandlerSocket;
 begin
   DataCount := 0;
   try
@@ -3868,18 +4174,28 @@ begin
       WaitForNextResponse := 1; // TISIndyTCPSvrSession does not wait
 
     // x FReadDataWait
-    while (FConnection <> nil) and (FConnection.Connected) and (AKey = '') and
-      (WaitForNextResponse > 0) do
+    while (AKey = '') and (WaitForNextResponse > 0) and
+      LockConnectionSkt(Socket) do
     begin
       buffer := nil;
-      FConnection.Socket.ReadTimeOut := FReadDataWaitDiv5;
-
+      SetLength(buffer, 0);
+      Socket.ReadTimeOut := FReadDataWaitDiv5;
       DataCount := ReadOneTransToBuffer(buffer);
       // FTCPClient knows how much data to expect and will return once read
       // o delay can increase to 25 seconds
 
       if DataCount = 0 then
-        Dec(WaitForNextResponse)
+      Begin
+        if FConnection = nil then
+        begin
+          ss := 'Thread = ' + IntToStr(FThreadID) + ' Closing ' + PortId;
+          WritelnIfPossible(ss);
+          ISIndyUtilsException(Self, '#' + ss);
+          Exit;
+        end
+        else
+          Dec(WaitForNextResponse);
+      End
       else if AnsiChar(buffer[0]) <> CTransactionStart then
       Begin
         ss := BytesToTextString(buffer, 30);
@@ -3887,12 +4203,13 @@ begin
           (' Read A TransactionRecord:: buffer[0]<> "<" ::Buffer=' + ss);
       End;
       // ReadATransactionRecord
-      DecodeIndyTCPBaseTransStart(buffer, DataCount, TransactionSize,
-        AKey, NewData);
+      If buffer <> nil then
+      Begin
+        DecodeIndyTCPBaseTransStart(buffer, DataCount, TransactionSize,
+          AKey, NewData);
 
-      // if (AKey = '') then
-      // AKey := cIdleFlag
-      ATrnctType := DecodeTransactionTCPType(AKey);
+        ATrnctType := DecodeTransactionTCPType(AKey);
+      End;
     End;
     // While No Transaction
 
@@ -3985,44 +4302,44 @@ begin
   end;
 end;
 
-function TISIndyTCPBase.ReadFullDuplexLogMessage: String;
-begin
-  if FFullDupLogList = nil then
-    Result := ''
-  Else
-    Try
-      While Not FLoggingListLock.TryEnter do
-        Sleep(1000);
-      Result := FFullDupLogList.Text;
-      FFullDupLogList.Clear;
-    Finally
-      FLoggingListLock.Release;
-    End;
-end;
+// function TISIndyTCPBase.ReadFullDuplexLogMessage: String;
+// begin
+// if FFullDupLogList = nil then
+// Result := ''
+// Else
+// Try
+// While Not FLoggingListLock.TryEnter do
+// Sleep(1000);
+// Result := FFullDupLogList.Text;
+// FFullDupLogList.Clear;
+// Finally
+// FLoggingListLock.Release;
+// End;
+// end;
 
-function TISIndyTCPBase.ReadLogMessage: String;
-begin
-  Try
-    if FLogList = nil then
-      Result := ''
-    Else
-      Try
-        While Not FLoggingListLock.TryEnter do
-          Sleep(1000);
-        Result := FLogList.Text;
-        if FLogsMissed > 0 then
-          Result := Result + #13#10 + 'Missed msgs=' + IntToStr(FLogsMissed);
-        FLogList.Clear;
-        FLogsMissed := 0;
-      Finally
-        FLoggingListLock.Release;
-      End;
-  Except
-    On E: Exception do
-      ISIndyUtilsException(Self, E, 'ReadLogMessage');
-
-  End;
-end;
+// function TISIndyTCPBase.ReadLogMessage: String;
+// begin
+// Try
+// if FLogList = nil then
+// Result := ''
+// Else
+// Try
+// While Not FLoggingListLock.TryEnter do
+// Sleep(1000);
+// Result := FLogList.Text;
+// if FLogsMissed > 0 then
+// Result := Result + #13#10 + 'Missed msgs=' + IntToStr(FLogsMissed);
+// FLogList.Clear;
+// FLogsMissed := 0;
+// Finally
+// FLoggingListLock.Release;
+// End;
+// Except
+// On E: Exception do
+// ISIndyUtilsException(Self, E, 'ReadLogMessage');
+//
+// End;
+// end;
 
 function TISIndyTCPBase.ReadOneTransToBuffer(var ABuffer: TIdBytes): integer;
 // Wait till data comes in
@@ -4045,10 +4362,12 @@ begin
   Result := 0;
   if FConnection = nil then
     Exit;
-
+  FConnected := true; // assume
   FReadWaitCount := 5;
-  while (FConnection <> nil) and (Result = 0) and (FReadWaitCount > 0) do
+  while FConnected and (Result = 0) and (FReadWaitCount > 0) do
     Try
+      ABuffer := nil; // Reset Buffer
+      SetLength(ABuffer, 0);
       if FNextTransactionData <> '' then
         ProcessHeaderWithLeftOver(ABuffer)
       Else
@@ -4059,7 +4378,9 @@ begin
       if InitialRead < MinTransactionSz + 1 then
       Begin
         if InitialRead > 0 then
-          FNextTransactionData := BufferAsAnsi(ABuffer);
+          FNextTransactionData := BufferAsAnsi(ABuffer)
+        else
+          FNextTransactionData := '';
         // if FReadWaitCount < 1 then
         // if GblRptTimeoutClear then
         // ISIndyUtilsException(Self,
@@ -4076,10 +4397,22 @@ begin
             FullTransactionDataSz, Key, Data);
         Except
           On E: EExceptionIsComsBadStart do
-            RecoverReadPosition(ABuffer, InitialRead, FullTransactionDataSz,
-              Key, Data);
+            Try
+              RecoverReadPosition(ABuffer, InitialRead, FullTransactionDataSz,
+                Key, Data);
+            Except
+              On E: Exception do
+              begin
+                ISIndyUtilsException(Self, E,
+                  'ReadOneTransToBuffer-RecoverReadPosition');
+                ApplicationFlagThreadMsg
+                  ('Exception ReadOneTransToBuffer-RecoverReadPosition');
+                Key := '';
+                Data := '';
+                FullTransactionDataSz := 0;
+              End;
+            end;
         end;
-
         // <1234KEYADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATA>
 
         InitialRead := Length(ABuffer);
@@ -4090,6 +4423,10 @@ begin
             InitialRead;
           if (StillToRead > 0) then
             ReadRestOfTransaction(ABuffer, FullTransactionDataSz);
+        End
+        Else
+        Begin
+          // Exit//nothing found
         End;
       End;
 
@@ -4101,6 +4438,7 @@ begin
         Begin
           ss := BytesToTextString
             (Copy(ABuffer, FullTransactionDataSz + MinTransactionSz - 5, 10));
+
           ISIndyUtilsException(Self, 'ReadOne#TransToBuffer no CTransactionEnd'
             + #13#10 + ss);
         End;
@@ -4122,36 +4460,49 @@ begin
       On E: EIdReadTimeout do
       begin
         DecWaitAndProcess;
+        // while testing
+        FRecoveredValidData := False;
       end;
       On ECg: EIdConnClosedGracefully do
       Begin
         ISIndyUtilsException(Self, ECg, 'Read#OneTransToBuffer A');
+        ApplicationFlagThreadMsg('ReadOneTransToBuffer A');
         FReadWaitCount := 0;
         FConnection := nil;
-        FIOHandler := nil;
+        // while testing
+        FRecoveredValidData := False;
       end;
       On Ep: EInvalidPointer do
       begin
         ISIndyUtilsException(Self, Ep, 'Read#OneTransToBuffer B');
+        ApplicationFlagThreadMsg('ReadOneTransToBuffer B');
         FReadWaitCount := 0;
         FConnection := nil;
-        FIOHandler := nil;
+        // while testing
+        FRecoveredValidData := False;
       end;
       On ECms: EExceptionIsComsNotExpected do
       begin
         ISIndyUtilsException(Self, ECms, 'Read#OneTransToBuffer C');
+        ApplicationFlagThreadMsg('ReadOneTransToBuffer C');
         FReadWaitCount := 0;
         FConnection := nil;
-        FIOHandler := nil;
+        // while testing
+        FRecoveredValidData := False;
       end;
       On E: Exception do
       begin
+        ApplicationFlagThreadMsg('ReadOneTransToBuffer D');
         ISIndyUtilsException(Self, E, 'Read#OneTransToBuffer D');
         FReadWaitCount := 0;
         FConnection := nil;
-        FIOHandler := nil;
+        // while testing
+        FRecoveredValidData := False;
       end;
     end; // Except On E.....
+
+  // while testing
+  FRecoveredValidData := False;
 
   if FConnection = nil then
     WasClosedForcfullyOrGracefully;
@@ -4161,39 +4512,58 @@ procedure TISIndyTCPBase.ReadRestOfTransaction(var ABuffer: TIdBytes;
   AFullTransactionDataSz: integer);
 Var
   StillToRead, ReadRestLoopCount, BufferLen: integer;
+  Socket: TIdIOHandlerSocket; // Localize
 begin
-  ReadRestLoopCount := 50;
-  if AFullTransactionDataSz < 1 then
-    Exit;
-
-  BufferLen := Length(ABuffer);
-  StillToRead := AFullTransactionDataSz + MinTransactionSz + 1 - BufferLen;
-
-  While (StillToRead > 0) and (ReadRestLoopCount > 0) Do
-  Begin
-    Try
-      FConnection.Socket.ReadBytes(ABuffer, -1, true);
-    Except
-      On Et: EIdReadTimeout do
-      begin
-        DecWaitAndProcess;
-        ISIndyUtilsException(Self, Et,
-          'Read#RestOfTransaction TimeOut Not Expected');
-      end;
-    End;
-    // Read All available
-    if BufferLen >= Length(ABuffer) Then
-      Dec(ReadRestLoopCount, 3); // Go faster if no data
+  Try
+    ReadRestLoopCount := 50;
+    if AFullTransactionDataSz < 1 then
+      Exit;
 
     BufferLen := Length(ABuffer);
     StillToRead := AFullTransactionDataSz + MinTransactionSz + 1 - BufferLen;
 
-    if StillToRead > 0 then
+    While (FConnection <> nil) and (StillToRead > 0) and
+      (ReadRestLoopCount > 0) Do
     Begin
-      Dec(ReadRestLoopCount);
-      if ReadRestLoopCount < 0 then
-        DecWaitAndProcess;
-      Sleep(10); // Could be 10x50 mscs
+      Try
+        if LockConnectionSkt(Socket) then
+          Socket.ReadBytes(ABuffer, -1, true);
+      Except
+        On Et: EIdReadTimeout do
+        begin
+          DecWaitAndProcess;
+          ISIndyUtilsException(Self, Et,
+            'Read#RestOfTransaction TimeOut Not Expected');
+        end;
+        On E: Exception do
+        begin
+          ISIndyUtilsException(Self, E,
+            'Read#RestOfTransaction Exception in Read');
+          ApplicationFlagThreadMsg('ReadRestOfTransaction Exception in Read::' +
+            E.Message);
+          WasClosedForcfullyOrGracefully;
+        end;
+      End;
+      // Read All available
+      if BufferLen >= Length(ABuffer) Then
+        Dec(ReadRestLoopCount, 3); // Go faster if no data
+
+      BufferLen := Length(ABuffer);
+      StillToRead := AFullTransactionDataSz + MinTransactionSz + 1 - BufferLen;
+
+      if StillToRead > 0 then
+      Begin
+        Dec(ReadRestLoopCount);
+        if ReadRestLoopCount < 0 then
+          DecWaitAndProcess;
+        Sleep(10); // Could be 10x50 mscs
+      End;
+    End;
+  Except
+    On E: Exception do
+    Begin
+      ISIndyUtilsException(Self, E, '#ReadRestOfTransaction');
+      ApplicationFlagThreadMsg('ReadRestOfTransaction Exp::' + E.Message);
     End;
   End;
 end;
@@ -4203,7 +4573,7 @@ Var
   Tst: TTimeSpan;
 begin
   Tst := FChnlStopWatch.Elapsed.Subtract(AGap);
-  Result := Tst < FLastIncoming;
+  Result := Tst < FLastFullDplxIncoming;
 end;
 
 procedure TISIndyTCPBase.RecoverReadPosition(var ABuffer: TIdBytes;
@@ -4212,7 +4582,10 @@ procedure TISIndyTCPBase.RecoverReadPosition(var ABuffer: TIdBytes;
 Var
   MsgBuf: TIdBytes;
   Msg: ansistring;
-  BufStrtOffset, BufEndOffset, BufNxtOffset, DataRead, BufferSz: integer;
+  OldBuffer: TIdBytes;
+  BufStrtOffset, LastStrtOffset, BufEndOffset, BufNxtOffset, DataRead,
+    BufferSz: integer;
+  Socket: TIdIOHandlerSocket; // Localize
   // Reads all data currently available into buffer  Timeout=msecs
   // Slides along data looking for <1234KEYADATAADATA
   // If it finds a valid transaction start
@@ -4223,7 +4596,7 @@ Var
 begin
   ISIndyUtilsException(Self, 'Recover#ReadPosition Start ACharsRead=' +
     IntToStr(ACharsRead));
-
+  ApplicationFlagThreadMsg('RecoverReadPosition');
   if FConnection = nil then
     Exit;
   if FConnection.Socket = nil then
@@ -4243,7 +4616,8 @@ begin
 
   DataRead := 0;
   Try
-    FConnection.Socket.ReadBytes(ABuffer, -1, true);
+    if LockConnectionSkt(Socket) then
+      Socket.ReadBytes(ABuffer, -1, true);
   Except
     On E: Exception do
     Begin
@@ -4259,28 +4633,30 @@ begin
     BufferSz := Length(ABuffer);
 
     BufNxtOffset := 0;
-    BufStrtOffset := BufferPos('<', BufNxtOffset, BufferSz, ABuffer);
-    BufEndOffset := BufferPos('>', BufNxtOffset, BufferSz, ABuffer);
+    BufStrtOffset := BufferPosAC('<', BufNxtOffset, BufferSz, ABuffer);
+    // BufEndOffset := BufferPosAC('>', BufNxtOffset, BufferSz, ABuffer);
+    // moves start nono
   Except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'Recover#ReadPosition Find Next><');
   End;
-  while (BufStrtOffset > 0) { or (BufEndOffset < 0) } do
+
+  while (BufStrtOffset > 0) do
     Try
       if BufStrtOffset > 0 then
       begin
-        if IsValid(BufStrtOffset, BufNxtOffset, ABuffer, ACharsRead,
-          ATransactionSize, AKey, ANewData) then
-          Exit
-        Else if BufStrtOffset > 0 then
-        Begin
-          BufNxtOffset := BufStrtOffset + 1;
-          BufStrtOffset := BufferPos('<', BufNxtOffset, BufferSz, ABuffer);
-          BufEndOffset := BufferPos('>', BufNxtOffset, BufferSz, ABuffer);
-        End;
+        LastStrtOffset := BufStrtOffset;
+        if IsValid(BufStrtOffset, ABuffer, ACharsRead, ATransactionSize, AKey,
+          ANewData) then
+          Exit;
+        // Else if BufStrtOffset > 0 then
+        // BufStrtOffset := BufferPosAC('<', BufNxtOffset, BufferSz, ABuffer);
+
+        BufEndOffset := BufStrtOffset - 1;
       end;
+
       if BufEndOffset > 0 then
-        if BufStrtOffset = BufEndOffset + 1 then
+        if ABuffer[BufEndOffset] = Ord('>') then
         Begin
           if BufEndOffset > 5 then
             MsgBuf := (Copy(ABuffer, BufEndOffset - 4, 20))
@@ -4292,8 +4668,20 @@ begin
             'Recover#ReadPosition "><" Found '#13#10 + Msg);
         end;
 
-      BufStrtOffset := BufferPos('<', BufNxtOffset, BufferSz, ABuffer);
-      BufEndOffset := BufferPos('>', BufNxtOffset, BufferSz, ABuffer);
+      BufStrtOffset := BufferPosAC('<', BufNxtOffset, BufferSz, ABuffer);
+      if BufStrtOffset < 1 then
+      Begin // there is no valid data in buffer
+        if (LastStrtOffset > 1) and
+          (LastStrtOffset > (BufferSz - 2 * MinTransactionSz)) then
+        begin
+          OldBuffer := ABuffer;
+          ABuffer := Copy(OldBuffer, LastStrtOffset, BufferSz);
+          SetLength(OldBuffer, 0);
+          Exit;
+        end
+        else // there is no valid header in buffer
+          SetLength(ABuffer, 0);
+      End;
     Except
       On E: Exception do
       Begin
@@ -4333,9 +4721,10 @@ begin
 end;
 
 procedure TISIndyTCPBase.RefreshBindingDetails;
+Var
+  Socket: TIdIOHandlerSocket; // localize
 begin
-  if (FConnection = nil) or (FConnection.Socket = nil) or
-    (FConnection.Socket.Binding = nil) then
+  if Not LockConnectionSkt(Socket) then
   begin
     if fPeerIP = '' then
       fPeerIP := '<No Address>';
@@ -4344,27 +4733,45 @@ begin
       fPeerIP := '<' + fPeerIP + '>';
       FIP := '<' + FIP + '>';
     End;
+    FBasePortID := fPeerIP + IntToStr(fPeerPort) + FIP + IntToStr(FPort);
     Exit;
   end;
 
-  if FConnection.Socket <> nil then
-    if FConnection.Socket.Binding <> nil then
-    begin
-      fPeerIP := FConnection.Socket.Binding.PeerIP;
-      FIP := FConnection.Socket.Binding.IP;
-      fPeerPort := FConnection.Socket.Binding.PeerPort;
-      FPort := FConnection.Socket.Binding.Port;
-    end;
+  if (Socket.Binding = nil) then
+  begin
+    if fPeerIP = '' then
+      fPeerIP := '<No Address>';
+    if fPeerIP[1] <> '<' then
+    Begin
+      fPeerIP := '<' + fPeerIP + '>';
+      FIP := '<' + FIP + '>';
+    End;
+    FBasePortID := fPeerIP + IntToStr(fPeerPort) + FIP + IntToStr(FPort);
+    Exit;
+  end
+  Else
+  begin
+    fPeerIP := Socket.Binding.PeerIP;
+    FIP := Socket.Binding.IP;
+    fPeerPort := Socket.Binding.PeerPort;
+    FPort := Socket.Binding.Port;
+    FBasePortID := fPeerIP + ':' + IntToStr(fPeerPort) + ' ' + FIP + ':' +
+      IntToStr(FPort);
+  end;
 end;
 
 function TISIndyTCPBase.RemoteAddress: ansistring;
+Var
+  Socket: TIdIOHandlerSocket;
 begin
   Try
-    if (FConnection = nil) or (FConnection.IOHandler = nil) then
-      Result := 'No Connection'
-    else if FConnection.Socket <> nil then
-      Result := FConnection.Socket.Binding.PeerIP
-    else
+    Result := 'No Connection';
+    if FConnection = nil then
+      Exit;
+
+    if LockConnectionSkt(Socket) then
+      Result := Socket.Binding.PeerIP
+    Else if FConnection.IOHandler <> nil then
       Result := DecodeIpAddress(PAnsiChar(FConnection.IOHandler.Host));
 
   Except
@@ -4424,11 +4831,11 @@ begin
               ANewData := '';
               AKey := '';
               ATrnctType := SmpAct;
-              FLastIncoming := FChnlStopWatch.Elapsed;
+              FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
             End
             else;
             if ATrnctType <> FlgError then
-              FLastIncoming := FChnlStopWatch.Elapsed;
+              FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
 
             If ANewData = '' then
               if FClosedForcfullyOrGracefully then
@@ -4458,7 +4865,8 @@ begin
       SetFullDuplex(true);
   end;
   if ATrnctType = FlgError then
-    LogAMessage('Error Return:' + BytesToLogText(AData));
+    ISIndyUtilsException(Self, 'Error Return:' + BytesToLogText(AData));
+  // LogAMessage('Error Return:' + BytesToLogText(AData));
 end;
 
 procedure TISIndyTCPBase.SetAddress(const Value: String);
@@ -4469,31 +4877,47 @@ end;
 procedure TISIndyTCPBase.SetConnection(AConnection: TIdTCPConnection);
 begin
   Try
-    if FConnection <> AConnection then
-    Begin
-      If (AConnection is TIsTrackIdTCPClientConnection) or
-        (FConnection is TIsTrackIdTCPClientConnection) then
-        FreeAndNil(FConnection)
-      else
-        FConnection := nil;
-      // Probably owned by a server
-      FIOHandler := nil;
-    End;
+    if LockConnection then
+      Try
+        // while testing
+        // if AConnection <> nil then
+        // if FConnection <> nil then
+        // If (FConnection is TIsTrackIdTCPClientConnection) then
+        // ApplicationFlagThreadMsg
+        // ('FConnection is TIsTrackIdTCPClientConnection')
+        // Else
+        // ApplicationFlagThreadMsg
+        // ('Set Connection not TIsTrackIdTCPClientConnection');
 
-    FConnection := AConnection;
-    if FConnection = nil then
-      RefreshBindingDetails;
+        if FConnection <> nil then
+          if FConnection <> AConnection then
+          Begin
+            If (FConnection is TIsTrackIdTCPClientConnection) then
+              FreeAndNil(FConnection)
+            else
+              FConnection := nil;
+            // Probably owned by a server
+          End;
 
-    if FConnection = nil then
-      Exit;
+        FConnection := AConnection;
+        if FConnection = nil then
+        begin
+          RefreshBindingDetails;
+          Exit;
+        end;
 
-    FIOHandler := FConnection.IOHandler;
-    RefreshBindingDetails;
+        RefreshBindingDetails;
+      Finally
+        LockConnectionFree;
+      End
+    Else
+      ApplicationFlagThreadMsg(Self, 'No Lock in Set Connection');
+
     if GblLogAllChlOpenClose then
-      ISIndyUtilsException(Self, '# Open Session ' + TextID);
+      ISIndyUtilsException(Self, '# Set Connection ' + TextID);
   Except
     On E: Exception Do
-      ISIndyUtilsException(Self, E, 'SetConnection');
+      ApplicationFlagThreadMsg(Self, E, 'SetConnection');
   End;
 end;
 
@@ -4608,13 +5032,13 @@ begin
   // Do not like abstract
 end;
 
-function TISIndyTCPBase.TextThreadDetails: String;
-begin
-  if FReadInMainThread then
-    Result := 'Main Thread Read'
-  Else
-    Result := 'Rd Thrd is ' + IntToStr(FThreadID);
-end;
+// function TISIndyTCPBase.TextThreadDetails: String;
+// begin
+// if FReadInMainThread then
+// Result := 'Main Thread Read'
+// Else
+// Result := 'Rd Thrd is ' + IntToStr(FThreadID);
+// end;
 
 {$IFNDEF  SuppressIPMetering}
 
@@ -4661,6 +5085,7 @@ end;
 function TISIndyTCPBase.WaitForData(AWaitTime: integer): boolean;
 Var
   LCount, LocalWait: integer;
+  Socket: TIdIOHandlerSocket;
 begin
   Result := False;
   if FConnection = nil then
@@ -4681,9 +5106,10 @@ begin
       LocalWait := 1;
     LCount := AWaitTime div LocalWait;
   end;
-  while not Result and (LCount > 0) do
+  while not Result and (LCount > 0) and (FConnection <> nil) do
   begin
-    Result := not FConnection.IOHandler.InputBufferIsEmpty;
+    If LockConnectionSkt(Socket) then
+      Result := not Socket.InputBufferIsEmpty;
     if not Result then
     begin
       Sleep(LocalWait);
@@ -4696,45 +5122,61 @@ end;
 procedure TISIndyTCPBase.WasClosedForcfullyOrGracefully;
 Var
   Duration: TTimeSpan;
+  LConnection: TIdTCPConnection;
+  Socket: TIdIOHandlerSocket;
 begin
   Duration := FChnlStopWatch.Elapsed;
   Try
-    if GblLogAllChlOpenClose then
-      ISIndyUtilsException(Self,
-        TextID + ' # WasClosedForcfullyOrGracefully Object Duration ' +
-        Duration.ToString);
-    If FConnection <> nil then
+    // while testing
+    ApplicationFlagThreadMsg(Self, 'Base WasClosedForcfullyOrGracefully '
+      + PortId);
+    // if GblLogAllChlOpenClose then
+    ISIndyUtilsException(Self,
+      TextID + ' # WasClosedForcfullyOrGracefully Object Duration ' +
+      Duration.ToString);
+
+    LockConnectionCon(LConnection);
+    If LConnection <> nil then
     Begin
-      if FIOHandler = FConnection.IOHandler then
-        FIOHandler := nil;
-      If FConnection.Connected then
-        FConnection.Disconnect(true);
+      if not(Self is TISIndyTCPClient) then // is a server session
+      Begin
+        ISIndyUtilsException(Self,
+          TextID + '# Server Connection in Close Gracfully');
+
+        If LockConnectionCon(LConnection) then
+          ISIndyUtilsException(Self,
+            TextID + '# Server Connection Connected in Close Gracfully');
+        FConnection := nil;
+      end;
+    End;
+
+    If LockConnectionCon(LConnection) then
+    begin
+      LConnection.Disconnect(true);
       // FConnection.Disconnect(false);
       FConnection := nil;
       Sleep(1000);
-      RefreshBindingDetails;
-    End
-    else
-    Begin
-      // if Self is TISIndyTCPClient then
-      // ISIndyUtilsException(Self,
-      // TextID + '#  Connection = nil in Close Gracfully');
-      FIOHandler := nil;
-    end;
+    End;
 
-    // if FIOHandler <> nil then
-    // begin
-    // FIOHandler.CloseGracefully;
-    // FIOHandler := nil;
-    // end;
     SetConnection(FConnection);
     FClosedForcfullyOrGracefully := true;
   Except
+    on EE: EInvalidPointer do
+    begin
+      // while testing
+      ApplicationFlagThreadMsg
+        ('TISIndyTCPBase.WasClosedForcfullyOrGracefullyock::' + EE.Message);
+      ISIndyUtilsException(Self, EE,
+        '#TISIndyTCPBase.WasClosedForcfullyOrGracefully');
+      FConnection := nil;
+    end;
     on E: Exception do
     begin
+      // while testing
+      WritelnIfPossible('TISIndyTCPBase.WasClosedForcfullyOrGracefully' +
+        E.Message);
       ISIndyUtilsException(Self, E,
         '#TISIndyTCPBase.WasClosedForcfullyOrGracefully');
-      FIOHandler := nil;
       FConnection := nil;
     end;
   end;
@@ -4794,44 +5236,60 @@ function TISIndyTCPBase.Write(AData: RawByteString): integer;
 Var
   LBuffer: TIdBytes;
   LLen: integer;
+  Socket: TIdIOHandlerSocket;
 begin
   Result := 0;
+  if FClosingTcpSocket then
+    Exit;
+
   LBuffer := RawToByteArray(AData);
   LLen := Length(LBuffer);
   if LLen > 0 then
     Try
-      if IOHandler <> nil then
-      Begin
-        If IOHandler.Connected then
-          IOHandler.WriteDirect(LBuffer, LLen, 0)
-        else
-          LLen := 0;
-      end
-      else if FConnection <> nil then
-        If (FConnection.IOHandler <> nil) and FConnection.IOHandler.Connected
-        then
-          FConnection.IOHandler.WriteDirect(LBuffer, LLen, 0)
-        else
-          LLen := 0;
+      if LockConnectionSkt(Socket) then
+        Socket.WriteDirect(LBuffer, LLen, 0)
+      else
+        LLen := 0;
+
       Result := LLen;
+
       If CheckWriteBusy Then
       begin
-        Sleep(1000);
         if GlobalTCPLogAllData then
           ISIndyUtilsException(Self, '#Write more than ' + IntToStr(CVLrgeBusy)
-            + ' per hour ' + TextID + ' Data =' + AData)
+            + ' per hour ' + TextID + ' Data =' + AData);
+        Sleep(1000);
       end;
     Except
+      On E: EIdConnClosedGracefully do
+      Begin
+        if GblLogAllChlOpenClose then
+          ApplicationFlagThreadMsg(Self, E, 'Closed Gracefully On Write::'
+            + PortId);
+        WasClosedForcfullyOrGracefully;
+        Result := 0;
+      end;
+      On ESkt: EIdSocketError do
+      Begin
+        if GblLogAllChlOpenClose then
+          ApplicationFlagThreadMsg(Self, ESkt,
+            'Unexpected Socket Error On Write::' + PortId);
+        WasClosedForcfullyOrGracefully;
+        Result := 0;
+      end;
+      On E: EAccessViolation Do
+      Begin
+        ApplicationFlagThreadMsg(Self, E, 'Seems Connection is Gone On Write::'
+          + PortId);
+        FConnection := nil;
+        Result := 0;
+      End;
       On E: Exception do
       Begin
-        if E is EIdConnClosedGracefully then
-          WasClosedForcfullyOrGracefully
-        Else
-         Begin
-          ISIndyUtilsException(Self, E, '# TISIndyTCPBase.Write');
-          If E is EIdSocketError then
-            WasClosedForcfullyOrGracefully;
-         End;
+        if GblLogAllChlOpenClose then
+          ApplicationFlagThreadMsg(Self, E, 'Unexpected Exception On Write::'
+            + PortId);
+        WasClosedForcfullyOrGracefully;
         Result := 0;
       End;
     End;
@@ -5140,6 +5598,7 @@ begin
   FStopWatch := TStopWatch.StartNew;
   Inc(GlobalCountOfIDTCPConnections);
   Inherited Create;
+  TSingletonObjTimeSpanRecording.RecordObjectOnCreate(Self);
 end;
 
 class function TIsTrackIdTCPClientConnection.CurrentConnections: integer;
@@ -5200,6 +5659,7 @@ begin
     Inc(GlobalThreadCount);
     inherited Create(true);
     FreeOnTerminate := False;
+    TSingletonObjTimeSpanRecording.RecordObjectOnCreate(Self);
   Except
     on E: Exception do
       ISIndyUtilsException(Self, E.Message);
@@ -5353,7 +5813,7 @@ begin
         Dec(Count);
         if Count < 0 then
         Begin
-          ISIndyUtilsException(Self, 'Threads not cleared');
+          ApplicationFlagThreadMsg(Self, 'Threads not cleared in Destroy');
           // FreeAndNil(fReadThread);
           // FreeAndNil(fWriteThread);
           fReadThread := nil;
@@ -5404,7 +5864,7 @@ begin
   begin
     Result := 'No Code For Action::' + ACommand;
     ISIndyUtilsException(Self, 'Sim Rmt: No Code For Action :' + ACommand);
-    LogAMessage(Result);
+    // LogAMessage(Result);
   end;
 end;
 
@@ -5454,7 +5914,7 @@ begin
     End;
   Except
     On E: Exception do
-      LogAMessage('DropCoupledSession::' + E.Message);
+      ISIndyUtilsException(Self, E, 'DropCoupledSession');
   End;
   FCoupledSession := nil;
 end;
@@ -5463,9 +5923,15 @@ procedure TISIndyTCPFullDuplexClient.DropThread(AThread: TThread);
 begin
   fReleaseThreads := true;
   if AThread = fReadThread then
-    fReadThread := nil;
-  if AThread = fWriteThread then
-    fWriteThread := nil;
+    fReadThread := nil
+  else if AThread = fWriteThread then
+    fWriteThread := nil
+  else
+  Begin
+    ApplicationFlagThreadMsg(Self, 'Unknown Thread in drop Thread');
+    Exit;
+  End;
+
   if fReadThread = fWriteThread then // both nil
     try
       if FOffThreadDestroy then
@@ -5498,6 +5964,8 @@ end;
 
 function TISIndyTCPFullDuplexClient.FullDuplexDispatchNoWait(AData: ansistring;
   AMaxQueue: integer): integer;
+Var
+  WaitNo: integer;
 begin
   Result := AMaxQueue;
   if fReleaseThreads then
@@ -5505,13 +5973,29 @@ begin
 
   If TrySetFullDuplex Then
   Begin
-    DplxWriteNoWaitCriticalSectionLock.Acquire;
+    WaitNo := 10;
+    While not DplxWriteNoWaitCriticalSectionLock.TryEnter do
+    begin
+      Dec(WaitNo);
+      if WaitNo < 1 then
+      Begin
+        ISIndyUtilsException(Self, '#No Despatch Lock ' + PortId);
+        WritelnIfPossible('No Despatch Lock ' + PortId);
+        raise EExceptionIsComsNotExpected.Create('No Despatch Lock Port ='
+          + PortId);
+      End
+      Else
+        Sleep(1000);
+    end;
     Try
       if FWaiting <> nil then
         if AMaxQueue < 0 then // Priority clear queue
         Begin
           FreeAndNil(FWaiting);
           FCurrentQueueOfRequests := 0;
+          ISIndyUtilsException(Self, '#Clear Despatch Queue ' + PortId);
+          // while testing
+          WritelnIfPossible('Clear Despatch Queue ' + PortId);
         End
         Else if AMaxQueue > 0 then
           if FCurrentQueueOfRequests > AMaxQueue then
@@ -5520,8 +6004,9 @@ begin
             Dec(FCurrentQueueOfRequests);
             if FRpt50Pops < 1 then
             Begin
+              ISIndyUtilsException(Self, '#Rpt50Pops > AMaxQueue =' +
+                IntToStr(AMaxQueue) + ' Port:' + PortId);
               FRpt50Pops := 50;
-              ISIndyUtilsException(Self, '#Rpt50Pops > AMaxQueue')
             End
             Else
               Dec(FRpt50Pops);
@@ -5540,20 +6025,20 @@ begin
   Result := FCurrentQueueOfRequests;
 end;
 
-procedure TISIndyTCPFullDuplexClient.LogAMessage(AMsg: String);
-begin
-  Try
-    inherited;
-    if Assigned(FOnLogMsg) then
-      // For Follow On Sessions
-      FOnLogMsg(TextID, AMsg) // must not sync with main thread
-    else
-      ISIndyUtilsException(Self, TextID + ' >> ' + AMsg);
-  Except
-    On E: Exception do
-      ISIndyUtilsException(Self, E, 'LogAMessage(' + AMsg + ')');
-  End;
-end;
+// procedure TISIndyTCPFullDuplexClient.LogAMessage(AMsg: String);
+// begin
+// Try
+// inherited;
+// if Assigned(FOnLogMsg) then
+// For Follow On Sessions
+// FOnLogMsg(TextID, AMsg) // must not sync with main thread
+// else
+// ISIndyUtilsException(Self, TextID + ' >> ' + AMsg);
+// Except
+// On E: Exception do
+// ISIndyUtilsException(Self, E, 'LogAMessage(' + AMsg + ')');
+// End;
+// end;
 
 function TISIndyTCPFullDuplexClient.MakeTimeStamp: ansistring;
 Var
@@ -5601,7 +6086,7 @@ begin
     End;
 
     if GblLogAllChlOpenClose then
-      ISIndyUtilsException(Self, '#' + 'OffThreadDestroy Enter :' + TextID);
+      ApplicationFlagThreadMsg(Self, '#' + 'OffThreadDestroy Enter :' + TextID);
 
     LOnDestroy := FOnDestroy;
     FOnDestroy := nil;
@@ -5614,13 +6099,13 @@ begin
     if Result then
       FOffThreadDestroy := true
     else if GblLogAllChlOpenClose then
-      ISIndyUtilsException(Self, '#' + 'OffThreadDestroy False');
+      ApplicationFlagThreadMsg(Self, '#' + 'OffThreadDestroy False');
 
     if Assigned(LOnDestroy) then
       LOnDestroy(Self);
   Except
     On E: Exception do
-      ISIndyUtilsException(Self, E, 'OffThreadDestroy');
+      ApplicationFlagThreadMsg(Self, E, 'OffThreadDestroy');
   end;
 end;
 
@@ -5699,15 +6184,15 @@ begin
     case TrnctType of
       EchoTrans:
         Begin
-          FLastIncoming := FChnlStopWatch.Elapsed;
+          FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
           Echo := Trans;
           Result := FullDuplexDispatch(Echo, Key);
           if GblLogMsgToGeneralLogl then
-            LogAMessage('Echo' + Trans + ' Key:' + Key);
+            ISIndyUtilsException(Self, 'Echo' + Trans + ' Key:' + Key);
         End;
       SmpAct:
         Begin
-          FLastIncoming := FChnlStopWatch.Elapsed;
+          FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
           if FCoupledSession <> nil then
             Result := true;
           Rtn := DoSimpleDuplexRemoteAction(Trans);
@@ -5715,19 +6200,19 @@ begin
           Begin
             Result := FullDuplexDispatch(Rtn, Key);
             if GblLogMsgToGeneralLogl then
-              LogAMessage(Trans + '::' + Rtn);
+              ISIndyUtilsException(Self, Trans + '::' + Rtn);
           End
         End;
       RdFileTrfBlk, MvString:
         Begin
-          FLastIncoming := FChnlStopWatch.Elapsed;
+          FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
           Rtn := 'Full Duplex Rx Does not support Key ' + Key;
           Key := cReturnError;
           Result := FullDuplexDispatch(Rtn, Key);
         End;
       MvRawStrm:
         Begin
-          FLastIncoming := FChnlStopWatch.Elapsed;
+          FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
           if Assigned(FOnAnsiStringAction) then
           Begin
             Rtn := FOnAnsiStringAction(Trans, Self);
@@ -5752,7 +6237,7 @@ begin
         End;
       FullDuplexMode:
         Begin
-          FLastIncoming := FChnlStopWatch.Elapsed;
+          FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
           Result := DoFullDuplexIncomingAction(Trans);
           If Not Result then
           Begin
@@ -5768,7 +6253,7 @@ begin
         End;
       FlgNull:
         Begin
-          FLastIncoming := FChnlStopWatch.Elapsed;
+          FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
           if Assigned(FCoupledSession) then
             FCoupledSession.FullDuplexDispatch('', Key);
           // Forward Null
@@ -5787,7 +6272,8 @@ begin
     Rtn := 'ProcessNonDuplexIncomingTransaction Rtn False Key = ' + Key;
     Key := cReturnError;
     Result := FullDuplexDispatch(Rtn, Key);
-    LogAMessage(Trans + ':ProcessNonDuplexIncomingTransaction Rtn False');
+    ISIndyUtilsException(Self,
+      Trans + ':ProcessNonDuplexIncomingTransaction Rtn False');
   end;
 
 end;
@@ -5843,6 +6329,7 @@ Var
   Key: ansistring;
   Data: ansistring;
   ErrorStr: String;
+  Socket: TIdIOHandlerSocket;
 Const
   IdleMs = 250;
 {$IFDEF Debug}
@@ -5864,7 +6351,7 @@ begin
       ISIndyUtilsException(Self, '#ReadLoop No Connection::' + TextID);
       Exit
     End;
-    if not FConnection.Connected then
+    if not LockConnectionSkt(Socket) then
     Begin
       ISIndyUtilsException(Self, '#ReadLoop Not Connected::' + TextID);
       Exit
@@ -5895,7 +6382,7 @@ begin
             Begin
               if GblLogPollActions then
                 ISIndyUtilsException(Self, '#FlgNull on ' + TextID);
-              FLastIncoming := FChnlStopWatch.Elapsed;
+              FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
               If FCoupledSession <> nil then
                 FCoupledSession.FullDuplexDispatch('', '');
               Sleep(1000);
@@ -5915,7 +6402,7 @@ begin
               else If not RecentData(SpanMult(FPoleInterval, 4)) then
                 if FPermHold then
                 Begin
-                  FLastIncoming := FChnlStopWatch.Elapsed;
+                  FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
                   if GblLogPollActions then
                     ISIndyUtilsException(Self,
                       '# No recent data but FPermHold so No OffThreadDestroy');
@@ -5924,7 +6411,7 @@ begin
                 begin
                   if GblLogAllChlOpenClose or GblRptTimeoutClear or GblLogPollActions
                   then
-                    ISIndyUtilsException(Self,
+                    ApplicationFlagThreadMsg(Self,
                       '# OffThreadDestroy ::If not RecentData(FPoleInterval * 4)');
                   OffThreadDestroy(true);
                 end;
@@ -5932,7 +6419,7 @@ begin
             End;
           FullDuplexMode:
             begin
-              FLastIncoming := FChnlStopWatch.Elapsed;
+              FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
               Result := DoFullDuplexIncomingAction(Data);
               if Not Result then
                 ISIndyUtilsException(Self, 'FullDuplexMode Data=' + Data);
@@ -5940,7 +6427,7 @@ begin
             end;
         Else
           Begin
-            FLastIncoming := FChnlStopWatch.Elapsed;
+            FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
             // is not an error
             ProcessNonDuplexIncomingTransaction(Data, Key, TrnctType);
           End;
@@ -5953,9 +6440,8 @@ begin
   Except
     on E: Exception do
     begin
-      ISIndyUtilsException(Self, 'Exception in ReadLoop::' + E.Message);
+      ApplicationFlagThreadMsg(Self, E, 'Exception in ReadLoop');
       Result := False;
-      LogAMessage('Exception in ReadLoop::' + E.Message);
     end;
   End;
 End;
@@ -6082,9 +6568,7 @@ begin
 {$ENDIF}
   SendTransaction(Trans, TrnsType, Key, Rtn);
   if Rtn <> '' then
-    Result := (Pos(ansistring('><  Frm '), Rtn) > 0);
-  if Not Result and (Rtn <> '') then
-    Result := (Pos(ansistring('Svr:'), Rtn) > 0);
+    Result := (Pos(ansistring(' >< '), Rtn) > 0);
 
   // Response should be textID on server
   if Not Result then
@@ -6168,8 +6652,8 @@ begin
           NewCon := TISIndyTCPFullDuplexClient.StartAccess(Address, ConPort)
         else
           NewCon := nil;
-        if (NewCon <> nil) then
-          TISIndyTCPFullDuplexClient(NewCon).OnLogMsg := AddLogMessage;
+        // if (NewCon <> nil) then
+        // TISIndyTCPFullDuplexClient(NewCon).OnLogMsg := AddLogMessage;
         WillOwn := true;
       End;
     except
@@ -6203,6 +6687,7 @@ end;
 constructor TISIndyTCPFullDuplexClient.StartAccess(const AServerName: String;
   APort: integer; ADoAfterConnection: TISIndyTCPEvent = nil);
 begin
+  // FRpt50Pops:=50;   Report first time Queue exceeded then every 50
   fFullDuplex := False;
   fReleaseThreads := False;
   FPoleInterval := TTimeSpan.FromMinutes(1);
@@ -6220,7 +6705,7 @@ begin
   ReadDataWaitDiv5 := 200;
   // ms between read actions Makes 5 attempts before Exiting Read Transaction
   // inherited StartAccess(AServerName, APort, ADoAfterConnection);
-  FLastIncoming := FChnlStopWatch.Elapsed;
+  FLastFullDplxIncoming := FChnlStopWatch.Elapsed;
 
   SetFullDuplex(true);
   fReadThread.Start;
@@ -6513,24 +6998,24 @@ end;
 
 procedure TIsMsgBuffer.AddBuffMsgStr(AMsg: String);
 begin
-  FListLock.Acquire;
+  FMsgBfrListLock.Acquire;
   try
     FData.Add(AMsg);
   finally
-    FListLock.Release;
+    FMsgBfrListLock.Release;
   end;
 end;
 
 constructor TIsMsgBuffer.Create;
 begin
   FData := TStringlist.Create;
-  FListLock := TCriticalSection.Create;
+  FMsgBfrListLock := TCriticalSection.Create;
 end;
 
 destructor TIsMsgBuffer.Destroy;
 begin
   FData.Free;
-  FListLock.Free;
+  FMsgBfrListLock.Free;
   inherited;
 end;
 
@@ -6541,7 +7026,7 @@ begin
     Exit;
 
   Result := true;
-  FListLock.Acquire;
+  FMsgBfrListLock.Acquire;
   Try
     if AReadLines < 1 then
     Begin
@@ -6563,7 +7048,7 @@ begin
       end;
     end
   Finally
-    FListLock.Release;
+    FMsgBfrListLock.Release;
   End;
 
 end;
@@ -6581,6 +7066,7 @@ begin
   Inc(GlblCountWaitData);
   if GlblCountWaitData > 500 then
     raise Exception.Create('CountWaitData>500');
+  TSingletonObjTimeSpanRecording.RecordObjectOnCreate(Self);
 end;
 
 destructor TWaitData.Destroy;
@@ -7162,7 +7648,7 @@ begin
           ISIndyUtilsException(Self, '#Kill Client ' + s +
             FTrdTCPClient.TextID);
           FTrdTCPClient.FOnDestroy := nil;
-          FTrdTCPClient.CloseGracefully;
+          FTrdTCPClient.CloseIsObjGracefully;
           FreeAndNil(FTrdTCPClient);
         End;
         // Else
@@ -7312,12 +7798,17 @@ Var
   Msg: string;
   LogFin: TLogFile;
 Begin
+  if GblIndyComsInFinalize then
+    Exit;
+
   GblIndyComsInFinalize := true;
   GLogISIndyUtilsException := False;
   // Stop finalization creating new ExceptLog
+  ApplicationFlagThreadMsg('GblIndyComsObjectFinalize');
   if ExceptLog <> nil then
     ExceptLog.LogALine(LogDateStamp + ' in GblIndyComsObjectFinalize');
-  FreeAndNil(ExceptLog);
+  FinalizeLogging;
+
   LogFin := TLogFile.Create(ExceptionLogName, true, 5000000, true, False);
   Try
     Try
@@ -7327,6 +7818,8 @@ Begin
       CWait := 2;
 
 {$ENDIF}
+      LogFin.LogALine('In Finalization Logging Thread =' +
+        IntToStr(TThread.CurrentThread.ThreadID));
       Msg := GlobalUsageCounts;
 
       LogFin.LogALine('Finalization ' + CRLF + Msg);
@@ -7337,10 +7830,8 @@ Begin
 
       if GCountOfConnections > 0 then
       Begin
-{$IFDEF MSWINDOWS}
-        OutputDebugString(PChar(IntToStr(GCountOfConnections) +
-          ' TCP Objects Created but not Destroyed'));
-{$ENDIF}
+        LogFin.LogALine(IntToStr(GCountOfConnections) +
+          ' TCP Objects Created but not Destroyed');
         while ((GCountOfConnections > 0) or (GlobalThreadCount > 0)) And
           (CWait > 0) do
         begin
@@ -7349,28 +7840,25 @@ Begin
             ' 5 Seconds later';
           LogFin.LogALine('#Finalization' + CRLF + Msg);
           Sleep(5000);
-{$IFDEF MSWINDOWS}
-          OutputDebugString(PChar(IntToStr(GCountOfConnections) +
-            'TCP Objects left 5 seconds later'));
+          LogFin.LogALine(IntToStr(GCountOfConnections) +
+            'TCP Objects left 5 seconds later');
           if (GlobalThreadCount > 0) then
-            OutputDebugString(PChar(IntToStr(GlobalThreadCount) +
-              'TCP Threads left 5 seconds later'));
-{$ENDIF}
+            LogFin.LogALine(IntToStr(GlobalThreadCount) +
+              'TCP Threads left 5 seconds later');
           Dec(CWait);
         end;
       End;
-{$IFDEF MSWINDOWS}
-      OutputDebugString(PChar(IntToStr(GCountOfHistoricalCons) +
-        'Total TCP Objects Created'));
+
+      LogFin.LogALine(IntToStr(GCountOfHistoricalCons) +
+        'Total TCP Objects Created');
       if GCountOfConnections < 1 then
-        OutputDebugString('All TCP Objects Destroyed')
+        LogFin.LogALine('All TCP Objects Destroyed')
       Else
-        OutputDebugString(PChar(IntToStr(GCountOfConnections) +
-          ' TCP Objects Created but not Destroyed'));
+        LogFin.LogALine(IntToStr(GCountOfConnections) +
+          ' TCP Objects Created but not Destroyed');
       if GlobalThreadCount > 0 then
-        OutputDebugString(PChar(IntToStr(GlobalThreadCount) +
-          'TCP Threads Created but not Destroyed'));
-{$ENDIF}
+        LogFin.LogALine(IntToStr(GlobalThreadCount) +
+          'TCP Threads Created but not Destroyed');
       Msg := GlobalUsageCounts;
       LogFin.LogALine('#Finalization ' + CRLF + Msg);
     Except

@@ -42,7 +42,8 @@ unit ISIndyUtils;
   procedure BytesToRaw(const AValue: TIdBytes; var VBuffer; const ASize: Integer);
 }
 {$IfDef FPC}
-{$I InnovaLibDefsLaz.inc}
+{$Define ISLazarus)
+// {$I InnovaLibDefsLaz.inc}
 {$ELSE}
 {$I InnovaLibDefs.inc}
 {$ENDIF}
@@ -53,7 +54,7 @@ Uses
 {$IFDEF MSWindows}
   WinApi.Windows,
 {$ENDIF}
-  {IsProcCl,} IdStack, IdGlobal, Classes, SyncObjs, sysutils,
+  {IsProcCl,} IdStack, IdGlobal, IdThread, Classes, SyncObjs, sysutils,
 {$IFNDEF FPC}
   IOUtils,
 {$ENDIF}
@@ -63,7 +64,6 @@ Uses
 {$IFDEF NextGen}
     , ISObjectCounter, IsNextGenPickup
 {$ENDIF}
-{$IFDEF ISXE2_DELPHI}
 {$IFDEF FMXApplication}
     , fmx.Graphics // fmx.imaging.JPeg;
 {$ELSE}
@@ -75,7 +75,6 @@ Uses
 {$ENDIF}
     ;
 /// /, JPeg;
-{$ENDIF}
 
 type
   TGblRptCount = class(TObject)
@@ -98,6 +97,13 @@ type
     procedure CountComsTypes(AObj: TObject; ANew: boolean);
   end;
 
+  TIsFifteenMinuteLogger = Class(TThread)
+  Protected
+    Procedure Execute; Override;
+  Public
+    Constructor Create;
+  end;
+
 Function ToBytesIS(const val: AnsiString): TIdBytes; overload;
 {$IFDEF FPC}
 Function ToBytesIS(const val: UnicodeString): TIdBytes; overload;
@@ -110,6 +116,14 @@ Function GraphicToBytes(IGraphicOut: TObject): TIdBytes;
 function BytesToGraphic(AData: TIdBytes): TObject; { }
 
 function IsNotMainThread: boolean;
+procedure ApplicationFlagThreadMsg(ALable: String;
+  AForceLog: boolean = False); overload;
+procedure ApplicationFlagThreadMsg(AObj: TObject; ALable: String;
+  AForceLog: boolean = False); overload;
+procedure ApplicationFlagThreadMsg(AObj: TObject; E: Exception;
+  ALable: String); overload;
+Procedure WritelnIfPossible(AText: String);
+// writeln if console app stop exception
 Procedure ISIndyUtilsException(Const AClassName, AExMessage: String); overload;
 Procedure ISIndyUtilsException(AObject: TObject; AExMessage: String); overload;
 Procedure ISIndyUtilsException(AObject: TObject; AException: Exception;
@@ -118,8 +132,8 @@ Procedure ISIndyUtilsException(AObject: TObject;
   AException: Exception); overload;
 Procedure ISIndyUtilsException(Const AClassName: string; AException: Exception;
   AExMessage: String); overload;
-Procedure SetExceptionLog(AExceptLogName: AnsiString;
-  AStartNewLogFile: boolean = false);
+Procedure SetExceptionLog(AExceptLogName: AnsiString; AIgnoreTimeCheck: boolean;
+  AStartNewLogFile: boolean = False);
 Function ExceptionLogName: string;
 Procedure FreeSListWObjects(var ThisList: TStringlist);
 function GetThisHostIPAddressViaIndy: AnsiString;
@@ -127,6 +141,7 @@ function GetThisHostIPAddressViaIndy: AnsiString;
 Var
   GCountOfHistoricalCons, GCountOfConnections: integer; // Base Connections
   GlobalCountOfComsObjectTypes: TGblRptComs;
+  CLogFileRollSz: integer = 1000000;
 
 implementation
 
@@ -384,8 +399,8 @@ Begin
     Result := Assigned(WakeMainThread);
 End;
 
-Function InitialiseExceptionLog(ALogName: string; AStartNewLogFile: boolean)
-  : TLogFile;
+Function InitialiseExceptionLog(ALogName: string; AStartNewLogFile: boolean;
+  AIgnoreTimeCheck: boolean): TLogFile;
 Begin
   If ALogName = '' then
     ALogName := ExceptionLogName;
@@ -395,21 +410,24 @@ Begin
     if AStartNewLogFile or (ExceptLog.FileName <> ALogName) then
     Begin
       ExceptLog.LogALine('InitialiseExceptionLog Closing to open new log');
-      FreeAndNil(Result); // frees ExceptLog and LogFt
+      FreeAndNil(Result); // frees ExceptLog and possibly LogFt
     End
     else
       Exit;
 
   if FileExists(ALogName) then
   Begin
-    AppendLogFile(ALogName, 100000, true); // Starts LogFt
-    ExceptLog := LogALineObject('#InitialiseExceptionLog');
+    AppendLogFile(ALogName, CLogFileRollSz, true); // Starts LogFt
+    If AStartNewLogFile then
+      ExceptLog := LogALineObject('#Rolling to new Exception Log')
+    Else
+      ExceptLog := LogALineObject('#InitialiseExceptionLog');
     If AStartNewLogFile then
       ExceptLog.RollAndFlagNewApplication;
   End
   Else
   Begin
-    AppendLogFile(ALogName, 100000, true); // Starts LogFt
+    AppendLogFile(ALogName, CLogFileRollSz, true); // Starts LogFt
     ExceptLog := LogALineObject('#InitialiseExceptionLog');
     LogALine(#13#10#13#10 + 'New Instance of Application ' +
       ExtractFileName(AllPlatformExeFileNameFrmISProcCl) + ' ::  ' +
@@ -418,8 +436,9 @@ Begin
   Result := ExceptLog;
 end;
 
-Procedure SetExceptionLog(AExceptLogName: AnsiString;
-  AStartNewLogFile: boolean = false);
+Procedure SetExceptionLog(AExceptLogName: AnsiString; AIgnoreTimeCheck: boolean;
+  AStartNewLogFile: boolean = False);
+
 Begin
   If AExceptLogName = '' then
     Exit;
@@ -431,7 +450,7 @@ Begin
       FreeAndNil(ExceptLog);
     end;
 
-  InitialiseExceptionLog(AExceptLogName, AStartNewLogFile);
+  InitialiseExceptionLog(AExceptLogName, AStartNewLogFile, AIgnoreTimeCheck);
 
   if Not GLogISIndyUtilsException then
   Begin
@@ -446,6 +465,7 @@ Var
   IniFile: TIniFile;
 begin
   Result := '';
+  IniFile := nil;
   If ExceptLog <> nil then
     Result := ExceptLog.FileName
   else if FileExists(IniFileNameFromExe) then
@@ -482,6 +502,101 @@ begin
 {$ENDIF}
 end;
 
+procedure ApplicationFlagThreadMsg(AObj: TObject; ALable: String;
+  AForceLog: boolean);
+begin
+  if AObj = nil then
+    ApplicationFlagThreadMsg(ALable)
+  else
+    Try
+      ApplicationFlagThreadMsg(AObj.ClassName + '  :: ' + ALable);
+    Except
+      on E: Exception Do
+        ISIndyUtilsException(Nil, E, '# App Thrd Msg Exception');
+    End;
+end;
+
+procedure ApplicationFlagThreadMsg(ALable: String; AForceLog: boolean);
+Var
+  s: string;
+begin
+{$IFDEF Release}
+  if Not AForceLog then
+    Exit;
+{$ENDIF}
+  Try
+    s := ALable + ' Flag Thread ' + IntToStr(TThread.CurrentThread.ThreadID);
+    if TThread.CurrentThread is TIdThread then
+      s := s + ' Name=' + TIdThread(TThread.CurrentThread).Name;
+    WritelnIfPossible(s);
+    ISIndyUtilsException('FlgTrd', '#' + s);
+  Except
+    On E: Exception do
+      ISIndyUtilsException('FlgTrd Exception', E, '#' + s);
+  end;
+end;
+
+procedure ApplicationFlagThreadMsg(AObj: TObject; E: Exception; ALable: String);
+Begin
+  if E <> nil then
+    ApplicationFlagThreadMsg(AObj, '<' + E.ClassName + '> ' + ALable, true)
+  else
+    ApplicationFlagThreadMsg(AObj, '<Nil> ' + ALable);
+End;
+
+Var
+  WritelnNotAvailable: boolean = False;
+  ConsoleFile: TLogFile = nil;
+
+Procedure WritelnIfPossible(AText: String);
+// writeln if console app stop exception
+Var
+  FileNm: String;
+  Lines: TStringlist;
+  i: integer;
+Begin
+  if WritelnNotAvailable then
+    if ConsoleFile = nil then
+      Exit
+    Else
+    Begin
+      ConsoleFile.LogALine(AText);
+      Exit
+    End;
+
+  Try
+    if Pos(#13#10, AText) > 1 then
+    begin
+      Lines := TStringlist.Create;
+      try
+        Lines.text := AText;
+        for i := 0 to Lines.Count - 1 do
+          Writeln(Lines[i]);
+      finally
+        Lines.Free;
+      end;
+
+    end
+    Else
+      Writeln(AText);
+  Except
+    WritelnNotAvailable := true;
+{$IFDEF Debug}
+    if ConsoleFile = nil then
+      Try
+        FileNm := 'Console' + IntToStr(TThread.CurrentThread.ThreadID) + '.txt';
+        FileNm := ChangeFileExt(ParamStr(0), FileNm);
+
+        if FileExists(FileNm) then
+          DeleteFile(FileNm);
+        ConsoleFile := TLogFile.Create(FileNm, true, 1000000, False, true);
+      Except
+        FreeAndNil(ConsoleFile);
+      End;
+{$ENDIF}
+  End;
+End;
+
 Procedure ISIndyUtilsException(Const AClassName, AExMessage: String);
 Var
   ss, LogNm: String;
@@ -492,7 +607,7 @@ Begin
       if ExceptLog = nil then
       Begin
         LogNm := ExceptionLogName;
-        ExceptLog := InitialiseExceptionLog(LogNm, false);
+        ExceptLog := InitialiseExceptionLog(LogNm, False, False);
       end;
       ss := AClassName;
       ss := ss + '::' + AExMessage;
@@ -504,7 +619,7 @@ Begin
             ss := '#' + ss[PosTimeHash + 1 + ZSISOffset] +
               Stringreplace(ss, '#' + ss[PosTimeHash + 1 + ZSISOffset], '', [])
           else
-            ss := '#' + Stringreplace(ss, '#', '', []);
+            ss := '#2' + Stringreplace(ss, '#', '', []);
       ExceptLog.LogALine(ss);
     Except
 {$IFDEF MSWindows}
@@ -534,8 +649,10 @@ Begin
     Try
       ISIndyUtilsException(AObject.ClassName, AExMessage);
     Except
+      On E: EAccessViolation do
+        ISIndyUtilsException('Expired Object Classname', AExMessage);
       On E: Exception do
-        ISIndyUtilsException('Expired Object', AExMessage)
+        ISIndyUtilsException('Expired Object', E, AExMessage)
     End;
 End;
 
@@ -560,24 +677,29 @@ Var
   val: TGblRptCount;
 begin
   if Assigned(FListOfData) then
-  begin
-    FLock.Acquire;
-    try
-      if not FListOfData.Find(AObj.ClassName, Index) then
-      begin
-        Index := FListOfData.AddObject(AObj.ClassName, TGblRptCount.New);
-        if GblLogAllChlOpenClose then
-          ISIndyUtilsException(AObj, '#New Object Class=' + AObj.ClassName);
-      end;
-      if index > -1 then
-      begin
-        val := FListOfData.Objects[Index] as TGblRptCount;
-        val.IncDec(ANew)
-      end;
-    finally
-      FLock.Release;
-    end;
-  end;
+    if FLock.TryEnter then
+      try
+        if not FListOfData.Find(AObj.ClassName, Index) then
+        begin
+          Index := FListOfData.AddObject(AObj.ClassName, TGblRptCount.New);
+          // while testing
+          if not(AObj is TLogFile) then
+            ApplicationFlagThreadMsg('TGblRptComs.CountComsTypes ' +
+              AObj.ClassName);
+          if GblLogAllChlOpenClose then
+            if not(AObj is TLogFile) then
+              ISIndyUtilsException(AObj, '#New Object Class=' + AObj.ClassName);
+        end;
+        if index > -1 then
+        begin
+          val := FListOfData.Objects[Index] as TGblRptCount;
+          val.IncDec(ANew)
+        end;
+      finally
+        FLock.Release;
+      end
+    Else
+      ApplicationFlagThreadMsg('TGblRptComs.CountComsTypes not locked');
 end;
 
 constructor TGblRptComs.Create;
@@ -589,7 +711,7 @@ begin
   FListOfData.Duplicates := dupError;
   FListOfData.Sorted := true;
   FListOfData.CaseSensitive := true;
-  FListOfData.OwnsObjects := false; // not objects
+  FListOfData.OwnsObjects := False; // not objects
   FLock := TCriticalSection.Create;
 end;
 
@@ -619,19 +741,28 @@ end;
 
 class function TGblRptComs.ReportObjectTypes: String;
 Begin
-  If not Assigned(GlobalCountOfComsObjectTypes) then
-  begin
-    GlobalCountOfComsObjectTypes := TGblRptComs.Create;
-    Result := #13#10 + 'Start Reporting IP Objects - Total Historical=' +
-      IntToStr(GCountOfHistoricalCons) + FormatDateTime('  dd mmm hh:nn', Now);
-  end
-  else
-  begin
-    Result := #13#10 + 'Reporting IP Objects - ' +
-      FormatDateTime('  dd mmm hh:nn', Now) + #13#10 + 'Total current=' +
-      IntToStr(GCountOfConnections) + ' and Total Historical=' +
-      IntToStr(GCountOfHistoricalCons) + #13#10'Global Count Report' +
-      GlobalCountOfComsObjectTypes.Report;
+  try
+    If not Assigned(GlobalCountOfComsObjectTypes) then
+    begin
+      GlobalCountOfComsObjectTypes := TGblRptComs.Create;
+      Result := #13#10 + 'Start Reporting IP Objects - Total Historical=' +
+        IntToStr(GCountOfHistoricalCons) +
+        FormatDateTime('  dd mmm hh:nn', Now);
+    end
+    else
+    begin
+      Result := #13#10 + 'Reporting IP Objects - ' +
+        FormatDateTime('  dd mmm hh:nn', Now) + #13#10 + 'Total current=' +
+        IntToStr(GCountOfConnections) + ' and Total Historical=' +
+        IntToStr(GCountOfHistoricalCons) + #13#10'Global Count Report' +
+        GlobalCountOfComsObjectTypes.Report;
+    end;
+  Except
+    On E: Exception do
+    Begin
+      ISIndyUtilsException('TGblRptComs', E, 'ReportObjectTypes');
+      Result := E.Message;
+    End;
   end;
 End;
 
@@ -655,12 +786,40 @@ begin
   Result := TGblRptCount.Create;
 end;
 
+{ TIsFifteenMinuteLogger }
+
+constructor TIsFifteenMinuteLogger.Create;
+begin
+  Inherited Create(False);
+  FreeOnTerminate := true;
+end;
+
+procedure TIsFifteenMinuteLogger.Execute;
+Var
+  HalfMin: integer;
+begin
+  HalfMin := 1;
+  while Not Terminated do
+    While HalfMin > 0 do
+    Begin
+      Dec(HalfMin);
+      if HalfMin < 1 then
+      Begin
+        ApplicationFlagThreadMsg(self, 'Time Now is ' +
+          FormatDateTime('dd mmm hh:nn:ss', Now));
+        HalfMin := 30;
+      End
+      Else
+       Sleep(30000);
+    End;
+end;
+
 initialization
 
 finalization
 
-GLogISIndyUtilsException := false;
+GLogISIndyUtilsException := False;
 FreeAndNil(GlobalCountOfComsObjectTypes);
+FreeAndNil(ConsoleFile);
 
-// FreeAndNil(ExceptLog); is
 end.

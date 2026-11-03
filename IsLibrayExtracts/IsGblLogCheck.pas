@@ -8,18 +8,20 @@ uses
   sysutils
 {$ELSE}
     System.sysutils
+{$IFDEF InnovaComms}
+  , InnovaCommsDbObjects
+{$ENDIF}
 {$ENDIF}
 {$IFDEF NextGen}
     , IsNextGenPickup
 {$ENDIF}
 {$IFDEF InnovaComms}
     , ISProcCl,
-  InnovaCommsDbObjects,
   isremoteconnectionindytcpobjs
 {$ENDIF}
     ;
 
-Procedure OpenAppLogging(AStartNewLogFile: Boolean; ALogFileName: String = '';
+Procedure OpenAppLogging(AStartNewLogFile,AIgnoreTimeCheck: Boolean; ALogFileName: String = '';
   ARptTcpOpenClose: Boolean = false; ARptTcpData: Boolean = false;
   ARptCommsPoll: Boolean = false; ARptAutoChannels: Boolean = false;
   ARptCommsConAttempts: Boolean = false);
@@ -39,10 +41,8 @@ Const
 {$ENDIF}
 
 Var
-  GblLogMsgToGeneralLogl: Boolean = false;
+  GblLogMsgToGeneralLogl: Boolean = false;     //was cLogAll
   // Put any messages logged to server in the general log LogAll: TCheckBox;
-  GLogISIndyUtilsException: Boolean = false;
-  //Put any ISIndyUtilsException references in LogFile
   GblLogAllChlOpenClose: Boolean = false;
   //Record TCP Channel open and close events
   // LogCO: TCheckBox;
@@ -62,13 +62,15 @@ Var
   //  unit IsMobileCaptureDevices;
   GblRptSendImages: Boolean = false;
   //  unit IsMobileCaptureDevices;
-
+{$IfDef Fpc}
+  GblRptIsCommsConnectionAttempts:Boolean = False;
+{$Endif}
 
 implementation
 
 uses IsIndyUtils,IsLogging;
 
-Procedure OpenAppLogging(AStartNewLogFile: Boolean; ALogFileName: String = '';
+Procedure OpenAppLogging(AStartNewLogFile,AIgnoreTimeCheck: Boolean; ALogFileName: String = '';
   ARptTcpOpenClose: Boolean = false; ARptTcpData: Boolean = false;
   ARptCommsPoll: Boolean = false; ARptAutoChannels: Boolean = false;
   ARptCommsConAttempts: Boolean = false);
@@ -79,9 +81,9 @@ begin
     (ChangeFileExt(AllPlatformExeFileNameFrmISProcCl, ''));
   GLogISIndyUtilsException := True;
   If ALogFileName <> '' then
-    SetExceptionLog(ALogFileName, AStartNewLogFile)
+    SetExceptionLog(ALogFileName,AIgnoreTimeCheck ,AStartNewLogFile)
   Else
-    SetExceptionLog(ExceptionLogName, AStartNewLogFile);
+    SetExceptionLog(ExceptionLogName,AIgnoreTimeCheck , AStartNewLogFile);
   ISIndyUtilsException(AppName, FormatDateTime('dddd dd mmm  hh.nn:ss.zzz ',
     Now) + #13#10);
   GblLogAllChlOpenClose := ARptTcpOpenClose;

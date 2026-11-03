@@ -14,6 +14,7 @@ uses
   SysUtils,
   Classes,
   SyncObjs,
+  IsLazarusPickup,
   {#$IFNDEF  SuppressIPMetering}
   IsLazTimeSpan,
   {#$ENDIF}
@@ -27,8 +28,9 @@ uses
   {#$ENDIF}
 {$ENDIF}
   IdContext, inifiles, IdTCPConnection, IdGlobal, IdYarn,
-  IdBaseComponent, IdComponent, IdCustomTCPServer, IdTCPServer, ISStrUtl,
-  IsArrayLib,
+  IdBaseComponent, IdComponent, IdCustomTCPServer,
+  IdTCPServer, IdThreadSafe,
+  ISStrUtl, IsArrayLib,
 {$IFDEF Nextgen}
   IsNextGenPickup,
 {$ENDIF}
@@ -56,6 +58,14 @@ type
   TIsIndyTCPServerContext = class;
 
   TISIndyTCPSvrSession = class(TISIndyTCPBase)
+    { New thinking September 2026
+      Session is Owned by Context }
+    // Session Freed on Context Destroy WasClosedForcfullyOrGracefully;
+    // Override;
+    // And CloseConnection;
+    // Override;
+    // Flag Context Closed ClearReferences Nulls FConnection and FIOHandler
+
     { Call Stack Close Remote Session
       TIdIOHandlerSocket.Close;
       TIdTCPConnection.Destroy;
@@ -74,10 +84,10 @@ type
 
     }
   private
-    FIsMeteredTransaction: Boolean;
+    FInSessionDestroy, FIsMeteredTransaction: Boolean;
     FTimeOutAt, FPermittedIdleTime, FReportIdleTime: TTimeSpan;
     FServerObject: TIdTcpServer;
-    FServerConnext: TIsIndyTCPServerContext;
+    FServerContext: TIsIndyTCPServerContext;
     FRegisteredAs: AnsiString;
     FOnSimpleRemoteAction: TComandActionAnsi;
     FOnStringAction: TComandActionString;
@@ -98,6 +108,7 @@ type
     // Link to Advertised - cServerLink
     // Start new followon  - cNewIPLink
     Procedure ClearReferences;
+    // Procedure BeforeContextRun(AContext:TIdContext);
 {$IFNDEF  SuppressIPMetering}
     Procedure CalAveSrvReadTime(ASample: TTimeSpan);
     Procedure CalAveTransProcTime(ASample: TTimeSpan);
@@ -108,7 +119,6 @@ type
   protected
     FCountTo80: Integer;
     FNext80TransactionAllowance: TTimeSpan;
-    FOnLogMsg: TISIndyLogEvent;
     // function ProcessSimpleRemoteActionTxn(ACommand: AnsiString):AnsiString;
     Procedure SetFullDuplex(Val: Boolean); override;
     Function CheckWriteBusy: Boolean; override;
@@ -117,10 +127,16 @@ type
     Procedure DoFileTransferBlockDnLd(ACommand: AnsiString);
     Procedure DoFileTransferBlockUpLd(ADataIn: AnsiString);
     procedure WasClosedForcfullyOrGracefully; Override;
+    procedure CloseConnection; Override;
   Public
     Constructor Create(AContext: TIsIndyTCPServerContext;
-      AServer: TIdCustomTCPServer; AConnection: TIdTCPConnection);
+      AServer: TIdCustomTCPServer);
     Destructor Destroy; Override;
+    Function FullDuplexDispatch(AData: AnsiString; AKey: AnsiString
+{$IFNDEF NextGen}
+      = '' // Not Next Gen
+{$ENDIF} ): Boolean; override;
+    // On A server session object FConnection maybe unsafe
     Function AcceptStart: Boolean;
     Function ProcessNextSrvrTransaction: Boolean;
     // function PackAServerFile(const AFileName: AnsiString): AnsiString;
@@ -135,15 +151,13 @@ type
 {$ENDIF}
     function LinkedTo(APort, BPort: Integer): Integer;
     function TextID: String; override;
-    function PortID: String; override;
-    Procedure DropSrvrReferences;
-    Procedure LogAMessage(AMessage: String); override;
+    function PortId: String; override;
+    // Procedure DropSrvrReferences;
     Property OnSimpleRemoteAction: TComandActionAnsi Read FOnSimpleRemoteAction
       Write FOnSimpleRemoteAction;
     Property OnStringAction: TComandActionString Read FOnStringAction
       Write FOnStringAction;
     // Property OnFullDuplexIncomingAction:TActionPassThru Read FOnFullDuplexIncomingAction write FOnFullDuplexIncomingAction;
-    Property OnLogMsg: TISIndyLogEvent Read FOnLogMsg write FOnLogMsg;
 {$IFNDEF  SuppressIPMetering}
     Property AveProcTm: Double Read FAveProcTm;
     Property AveDispatchTm: Double Read FAveDispatchTm;
@@ -154,8 +168,9 @@ type
 
   TIsIndyTCPServerContext = class(TIdServerContext)
   Private
+    FContextID: string;
     FTcpRef: TISIndyTCPSvrSession;
-    FDestroying: Boolean;
+    FSessionClosing: Boolean;
     FContextStopWatch: TStopwatch;
 {$IFNDEF  SuppressIPMetering}
     FLastProcessComplete: TTimeSpan;
@@ -196,31 +211,47 @@ type
 
   { TIsIndyApplicationServer }
   TIsIndyApplicationServer = class(TIdTcpServer)
+  Strict Private
+    FApSrvrListLock: TCriticalSection;
+    FBusyLock: TCriticalSection;
   Private
     FServerClosing: Boolean;
     FLogsMissed: Integer;
-    fCurrentAddresses, FLogList: TStringList;
-    fCurrentSessionObjects: TList;
+    FCurrentAddresses, FLogList: TStringList;
+    // TIdThreadSafeStringList;
+    FListOfRegConnections: TIdThreadSafeStringList;
+    FCurrentSessionObjects: TThreadList;
     FDoNextCloseEvent: TDateTime;
     FCleanupThread: TServerCleanup;
-    FBusyLock: TCriticalSection;
-    FListLock: TCriticalSection;
     FOnSessionSimpleRemoteAction: TComandActionAnsi;
     FOnSessionAnsiStringAction: TComandActionAnsi;
     FOnSessionStringAction: TComandActionString;
     FServerTcpSessions: Integer;
-    FListOfRegConnections: TStringList;
     FTimeLimitFor80Calls, FTimeLimitFor80Transactions: TTimeSpan;
     FIdleTimePermitted: TTimeSpan;
-    FResetStartTime: TDateTime; // if > now then reset/reject calls;
+    FResetStartTime: TDateTime;
+    FAllowNoPersonality: Boolean; // if > now then reset/reject calls;
     function GetSessionByCallingPort(APeerPortNo: Integer)
       : TISIndyTCPSvrSession;
     // Find ASession on the server given the calling port
-    Function ListOfRegConnections: TStringList;
+    Function ListOfRegConnections: TIdThreadSafeStringList;
     Function LocalContext(AContext: TIdContext): TIsIndyTCPServerContext;
     Function ResetSvr(AData: AnsiString): AnsiString;
     // procedure IsIdTCPSrvrContextCreated(AContext: TIdContext);
+    Function ApSrvrListLockTryEnter(ALable: String;
+      ATryHalfSecs: Integer = 0): Boolean;
+    Function BusyLockTryEnter: Boolean;
+    Procedure BusyLockRelease;
+    // procedure ApSrvrListLockEnter(ALable: String);
+    procedure ApSrvrListLockRelease(ALable: String);
     procedure IsIdTCPSrvrConnect(AContext: TIdContext);
+    // Server.IOHandler.Accept(Binding, Self, LYarn);
+    // Create and init context
+    // LContext := Server.FContextClass.Create(LPeer, LYarn, Server.Contexts)
+    // LYarn.Run Holds Thread LContext.Run
+    // TIdThread.Execute; with loop???
+    // LContext.OnRun := Server.DoExecute := IsIdTCPSvrSessionExecute
+    procedure ISIdSrvThrdException(AContext: TIdContext; AException: Exception);
     procedure IsIdTCPSvrSessionExecute(AContext: TIdContext);
     procedure CheckBusyOnConnect(AContext: TIsIndyTCPServerContext);
     // Connections on Ip Address
@@ -238,10 +269,10 @@ type
   Protected
     FSrvrStopWatch: TStopwatch;
     procedure Shutdown; override;
-    procedure AddLogMessage(ATextID, AMsg: String);
   Public
     Constructor Create(AOwner: TComponent);
     Destructor Destroy; override;
+    Function CurrentlyReset: Boolean;
     Function ServerDetailsAsText: AnsiString;
     Function AllConnectionsAsText: AnsiString;
     Function AllConnectionResponseTimesAsText: AnsiString;
@@ -266,6 +297,8 @@ type
       write SetMaxCallsperminute;
     Property IdleTimePermitted: TTimeSpan Read FIdleTimePermitted
       Write FIdleTimePermitted;
+    Property AllowNoPersonality: Boolean Read FAllowNoPersonality
+      Write FAllowNoPersonality;
   end;
 
   TIsMonitorTCPAppServer = Class(TObject)
@@ -317,49 +350,26 @@ end;
 
 { TIsIndyApplicationServer }
 
-procedure TIsIndyApplicationServer.AddLogMessage(ATextID, AMsg: String);
-
-begin
-  // Exit;//Temp Test
-
-  if GblLogMsgToGeneralLogl then
-    ISIndyUtilsException(Self, ATextID + '#' + AMsg);
-
-  Try
-    If FLogsMissed > 0 then
-      ISIndyUtilsException(Self, '# Missed Msg<' + IntToStr(FLogsMissed) +
-        '> AddLogMessage>>' + AMsg);
-    If FListLock.TryEnter then
-      try
-        If FLogList = nil then
-          FLogList := TStringList.Create;
-        if FLogList.Count < 100 then
-          FLogList.Add(FormatDateTime('nn:ss.zzz ', now) + ATextID + ':' +
-            ' : ' + AMsg)
-      finally
-        FListLock.Release
-      end
-    Else
-      Inc(FLogsMissed);
-  Except
-    On E: Exception do
-      ISIndyUtilsException(Self, E, '#' + ' AddLogMessage');
-  end;
-end;
-
 procedure TIsIndyApplicationServer.AddSession(ASession: TISIndyTCPSvrSession);
 Var
   Idx: Integer;
+  LSessions: TList;
 begin
-  if fCurrentSessionObjects = nil then
-    fCurrentSessionObjects := TList.Create;
-  FListLock.Acquire;
+  if FCurrentSessionObjects = nil then
+    FCurrentSessionObjects := TThreadList.Create;
+  If not ApSrvrListLockTryEnter('AddSession ' + ASession.FRegisteredAs, 30) then
+    raise EExceptionIsComsNotExpected.Create('Cannot Lock Session');
   Try
-    Idx := fCurrentSessionObjects.IndexOf(ASession);
-    if Idx < 0 then
-      fCurrentSessionObjects.Add(ASession);
+    LSessions := FCurrentSessionObjects.LockList;
+    Try
+      Idx := LSessions.IndexOf(ASession);
+      if Idx < 0 then
+        FCurrentSessionObjects.Add(ASession);
+    Finally
+      FCurrentSessionObjects.UnlockList;
+    end;
   Finally
-    FListLock.Release;
+    ApSrvrListLockRelease('AddSession ');
   end;
 
   ConfirmRegisteredConnections;
@@ -372,30 +382,37 @@ function TIsIndyApplicationServer.AllConnectionResponseTimesAsText: AnsiString;
 Var
   i: Integer;
   Obj: TISIndyTCPSvrSession;
+  LSessions: TList;
 begin
   Try
-    if fCurrentSessionObjects = nil then
+    if FCurrentSessionObjects = nil then
       Result := 'No Current Sessions' + #13#10
-    Else
-    begin
-      Result := IntToStr(fCurrentSessionObjects.Count) +
-        ' Current Sessions' + #13#10;
-      for i := 0 to fCurrentSessionObjects.Count - 1 do
-      Begin
-        if TObject(fCurrentSessionObjects[i]) is TISIndyTCPSvrSession then
-          Obj := TISIndyTCPSvrSession(fCurrentSessionObjects[i])
-        else
-          Obj := nil;
+    Else if ApSrvrListLockTryEnter('AllConnectionResponseTimesAsText', 4) then
+      Try
+        LSessions := FCurrentSessionObjects.LockList;
+        Try
+          Result := IntToStr(LSessions.Count) + ' Current Sessions' + #13#10;
+          for i := 0 to LSessions.Count - 1 do
+          Begin
+            if TObject(LSessions[i]) is TISIndyTCPSvrSession then
+              Obj := TISIndyTCPSvrSession(LSessions[i])
+            else
+              Obj := nil;
 
 {$IFNDEF  SuppressIPMetering}
-        if Obj <> nil then
-        Begin
-          Result := Result + #13#10#13#10 + Obj.ConnectionResponseTimesText +
-            #13#10#13#10 + Obj.TickStatsAsString;
-        End;
+            if Obj <> nil then
+            Begin
+              Result := Result + #13#10#13#10 + Obj.ConnectionResponseTimesText
+                + #13#10#13#10 + Obj.TickStatsAsString;
+            End;
 {$ENDIF}
+          end;
+        Finally
+          FCurrentSessionObjects.UnlockList;
+        end;
+      Finally
+        ApSrvrListLockRelease('AllConnectionResponseTimesAsText');
       end;
-    end;
   Except
     On E: Exception do
       Result := Result + #13#10 + 'Exception::' + E.Message;
@@ -406,53 +423,88 @@ function TIsIndyApplicationServer.AllConnectionsAsText: AnsiString;
 Var
   i: Integer;
   Obj: TISIndyTCPSvrSession;
+  LSessions: TList;
+  LRegCon: TStringList;
+
 begin
   Try
-    if fCurrentSessionObjects = nil then
+    if FCurrentSessionObjects = nil then
       Result := 'No Current Sessions' + #13#10
-    Else
-    begin
-      Result := IntToStr(fCurrentSessionObjects.Count) +
-        ' Current Sessions' + #13#10;
-      for i := 0 to fCurrentSessionObjects.Count - 1 do
-      Begin
-        if TObject(fCurrentSessionObjects[i]) is TISIndyTCPSvrSession then
-          Obj := TISIndyTCPSvrSession(fCurrentSessionObjects[i])
-        else
-          Obj := nil;
-        if Obj <> nil then
-          if Obj.FCoupledSession <> nil then
-            Result := Result + Obj.PortID + ' is linked' + #13#10
-          else
-            Result := Result + Obj.PortID + #13#10;
+    Else if ApSrvrListLockTryEnter('AllConnectionsAsText', 4) then
+      Try
+        LSessions := FCurrentSessionObjects.LockList;
+        Try
+          Result := IntToStr(LSessions.Count) + ' Current Sessions' + #13#10;
+          for i := 0 to LSessions.Count - 1 do
+            Try
+              if TObject(LSessions[i]) is TISIndyTCPSvrSession then
+                Obj := TISIndyTCPSvrSession(LSessions[i])
+              else
+                Obj := nil;
+              if Obj <> nil then
+                if Obj.FCoupledSession <> nil then
+                  Result := Result + Obj.PortId + ' is linked to ' +
+                    Obj.FCoupledSession.PortId + '>>' +
+                    Obj.FRegisteredAs + #13#10
+                else
+                  Result := Result + Obj.PortId + '>>' +
+                    Obj.FRegisteredAs + #13#10;
+            Except
+              On E: Exception Do
+              Begin
+                Result := Result + 'Exception <' + E.Message + '>i=' +
+                  IntToStr(i) + #13#10;
+                ApplicationFlagThreadMsg('AllConnectionsAsText Exception <' +
+                  E.Message + '>i=' + IntToStr(i))
+              End;
+            End;
+        Finally
+          FCurrentSessionObjects.UnlockList;
+        end;
+      Finally
+        ApSrvrListLockRelease('AllConnectionsAsText');
       end;
-    end;
     if FListOfRegConnections = nil then
-      Result := Result + 'No Advertised Sessions' + #13#10
-    Else
-    begin
-      Result := Result + IntToStr(FListOfRegConnections.Count) +
-        ' Advertised Sessions' + #13#10;
-      for i := 0 to FListOfRegConnections.Count - 1 do
-      Begin
-        if FListOfRegConnections.Objects[i] is TISIndyTCPSvrSession then
-          Obj := TISIndyTCPSvrSession(FListOfRegConnections.Objects[i])
-        else
-          Obj := nil;
-        if Obj = nil then
-          Result := Result + FListOfRegConnections[i] + ' == ' +
-            Obj.PortID + #13#10
-        else if Obj.FCoupledSession <> nil then
-          Result := Result + FListOfRegConnections[i] + ' == ' + Obj.PortID +
-            ' is linked' + #13#10
-        else
-          Result := Result + FListOfRegConnections[i] + ' == ' +
-            Obj.PortID + #13#10;
+      Result := Result + #13#10'No Advertised Sessions'#13#10
+    Else if ApSrvrListLockTryEnter('AllConnectionsAsText Adv', 4) then
+      Try
+        LRegCon := FListOfRegConnections.Lock;
+        Try
+          Result := Result + #13#10 + IntToStr(LRegCon.Count) +
+            ' Advertised Sessions' + #13#10;
+
+          for i := 0 to LRegCon.Count - 1 do
+            Try
+              if LRegCon.Objects[i] is TISIndyTCPSvrSession then
+                Obj := TISIndyTCPSvrSession(LRegCon.Objects[i])
+              else
+                Obj := nil;
+              if Obj = nil then
+                Result := Result + LRegCon[i] + ' == ' + #13#10
+              else if Obj.FCoupledSession <> nil then
+                Result := Result + LRegCon[i] + ' == ' + Obj.PortId +
+                  ' is linked' + #13#10
+              else
+                Result := Result + LRegCon[i] + ' == ' + Obj.PortId + #13#10;
+            Except
+              On E: Exception Do
+              Begin
+                Result := Result + 'Exception <' + E.Message + '>i=' +
+                  IntToStr(i) + #13#10;
+                ApplicationFlagThreadMsg('Advertised Sessions Exception <' +
+                  E.Message + '>i=' + IntToStr(i))
+              End;
+            end;
+        Finally
+          FListOfRegConnections.Unlock;
+        end;
+      Finally
+        ApSrvrListLockRelease('AllConnectionsAsText Adv');
       end;
-    end;
   Except
     On E: Exception do
-      Result := Result + #13#10 + 'Exception::' + E.Message;
+      Result := Result + #13#10 + 'AllConnectionsAsText Exception::' +
+        E.Message;
   End;
 end;
 
@@ -461,66 +513,169 @@ function TIsIndyApplicationServer.AllRegisteredConnections
 Var
   Index, i: Integer;
   s: string;
+  LRegCon: TStringList;
+  ThisObj: TISIndyTCPSvrSession;
+  Obj: TObject;
 begin
-  ListOfRegConnections;
-  if AConnection <> nil then
-    if AConnection.FRegisteredAs <> '' then
-      if AConnection.CheckConnection then
-      Begin
-        Index := FListOfRegConnections.IndexOf(AConnection.FRegisteredAs);
-        if GblRptRegConnectiononSrvr then
-        Begin
-          s := AConnection.PortID;
-          If Index < 0 then
-            s := s + '  #Add Registered Connection::' +
-              AConnection.FRegisteredAs
-          Else
-            s := s + '  #Existing Registered Connection::' +
-              AConnection.FRegisteredAs;
-          ISIndyUtilsException(Self, s);
-        End;
-        If Index < 0 then
-          FListOfRegConnections.AddObject(AConnection.FRegisteredAs,
-            AConnection)
-        Else
-          FListOfRegConnections.Objects[index] := AConnection;
-      end;
-
-  if FListOfRegConnections.Count < 1 then
-    Result := 'No Connections'
-  else
-    Result := '';
   Try
-    For i := FListOfRegConnections.Count - 1 downto 0 do
-      if FListOfRegConnections.Objects[i] is TISIndyTCPSvrSession then
-      Begin
-        if TISIndyTCPSvrSession(FListOfRegConnections.Objects[i]).CheckConnection
-        then
-          Result := Result + TISIndyTCPSvrSession
-            (FListOfRegConnections.Objects[i]).ConnectionStatusText + #13#10
-        Else
-        Begin
-          FListOfRegConnections.Objects[i] := nil;
-          FListOfRegConnections.Delete(i);
-          Result := Result + 'Closed Object at ' + IntToStr(i) + #13#10;
-        End;
-      End
-      else if FListOfRegConnections.Objects[i] = nil then
-        Result := Result + 'Nil Object at ' + IntToStr(i) + #13#10
-      else
-        Try
-          FListOfRegConnections.Objects[i] := nil;
-          FListOfRegConnections.Delete(i);
-          Result := Result + 'Unknown Object at ' + IntToStr(i) + #13#10;
-        Except
-          On E: Exception do
-            Result := Result + 'Exception::' + E.Message + ' at ' +
-              IntToStr(i) + #13#10;
-        end;
+    If Not ApSrvrListLockTryEnter('AllRegisteredConnections ' +
+      AConnection.PortId, 10) then
+      raise EExceptionIsComsNotExpected.Create
+        ('AllRegisteredConnections no Lock:: ' + AConnection.PortId);
+    Try
+      LRegCon := ListOfRegConnections.Lock;
+      Try
+        if AConnection <> nil then
+          if AConnection.FRegisteredAs <> '' then
+            if AConnection.CheckConnection then
+            Begin
+              Index := LRegCon.IndexOf(AConnection.FRegisteredAs);
+              if GblRptRegConnectiononSrvr then
+              Begin
+                s := AConnection.PortId;
+                If Index < 0 then
+                  s := s + '  #Add Registered Connection::' +
+                    AConnection.FRegisteredAs
+                Else
+                  s := s + '  #Existing Registered Connection::' +
+                    AConnection.FRegisteredAs;
+                ISIndyUtilsException(Self, s);
+              End;
+              If Index < 0 then
+                LRegCon.AddObject(AConnection.FRegisteredAs, AConnection)
+              Else
+                LRegCon.Objects[index] := AConnection;
+            end;
+
+        if LRegCon.Count < 1 then
+          Result := 'No Connections'
+        else
+          Result := '';
+
+        For i := LRegCon.Count - 1 downto 0 do
+          Try
+            Obj := LRegCon.Objects[i];
+            if Obj is TISIndyTCPSvrSession then
+            begin
+              ThisObj := TISIndyTCPSvrSession(Obj);
+              if ThisObj.CheckConnection then
+                Result := Result + ThisObj.ConnectionStatusText + #13#10
+              Else
+              begin
+                LRegCon.Objects[i] := nil;
+                LRegCon.Delete(i);
+                Result := Result + 'Closed Object at ' + IntToStr(i) + #13#10;
+              end;
+            end
+            else if Obj = nil then
+              Result := Result + 'Nil Object at ' + IntToStr(i) + #13#10
+            else
+            Begin
+              LRegCon.Objects[i] := nil;
+              LRegCon.Delete(i);
+              Result := Result + 'Unknown Object at ' + IntToStr(i) + #13#10;
+            end;
+          Except
+          end;
+      Finally
+        FListOfRegConnections.Unlock;
+      end;
+    Finally
+      ApSrvrListLockRelease('AllRegisteredConnections');
+    End;
   Except
     On E: Exception do
+    begin
+      ISIndyUtilsException(Self, E, 'AllRegisteredConnections');
       Result := Result + 'Exception::' + E.Message;
+      ApplicationFlagThreadMsg(Result);
+    end
   end;
+end;
+
+// procedure TIsIndyApplicationServer.ApSrvrListLockEnter(ALable: String);
+// Var
+// s: string;
+// begin
+// Try
+// s := ALable + '# FApSrvrList Attempt Locked by ' +
+// IntToStr(TThread.CurrentThread.ThreadID);
+// WritelnIfPossible(s);
+// ISIndyUtilsException(Self, s);
+// FApSrvrListLock.Enter;
+// s := ALable + '# FApSrvrList Locked by ' +
+// IntToStr(TThread.CurrentThread.ThreadID);
+// WritelnIfPossible(s);
+// ISIndyUtilsException(Self, s);
+// Except
+// On E: Exception do
+// ISIndyUtilsException(Self, E, s);
+// end;
+// end;
+
+procedure TIsIndyApplicationServer.ApSrvrListLockRelease(ALable: String);
+Var
+  s: string;
+begin
+  Try
+    FApSrvrListLock.Release;
+{$IFDEF Release}
+    Exit;
+{$ENDIF}
+    s := ALable + ' FApSrvrList Released by ' +
+      IntToStr(TThread.CurrentThread.ThreadID);
+    WritelnIfPossible(s);
+    ISIndyUtilsException(Self, '#' + s);
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, s);
+  end;
+end;
+
+function TIsIndyApplicationServer.ApSrvrListLockTryEnter(ALable: String;
+  ATryHalfSecs: Integer): Boolean;
+Var
+  s: string;
+begin
+  Result := false;
+  Try
+    Result := FApSrvrListLock.TryEnter;
+    if Result then
+      s := ALable + ':: FApSrvrList is Locked by ' +
+        IntToStr(TThread.CurrentThread.ThreadID)
+    else
+      while Not Result and (ATryHalfSecs > 0) do
+      Begin
+        Sleep(500);
+        s := IntToStr(ATryHalfSecs) + ': ' + ALable;
+        Result := ApSrvrListLockTryEnter(s, 0);
+        Dec(ATryHalfSecs);
+      End;
+
+    if Not Result then
+      s := ALable + ':: FApSrvrList Lock Failed by ' +
+        IntToStr(TThread.CurrentThread.ThreadID);
+{$IFDEF Release}
+    Exit;
+{$ENDIF}
+    WritelnIfPossible(s);
+    ISIndyUtilsException(Self, '#' + s);
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, s);
+  end;
+end;
+
+procedure TIsIndyApplicationServer.BusyLockRelease;
+begin
+  FBusyLock.Release;
+end;
+
+function TIsIndyApplicationServer.BusyLockTryEnter: Boolean;
+begin
+  Result := FBusyLock.TryEnter;
+  if Not Result then
+    ApplicationFlagThreadMsg('Failed BusyLock');
 end;
 
 procedure TIsIndyApplicationServer.CheckBusyOnConnect
@@ -540,28 +695,31 @@ begin
     Exit;
   if AContext.Connection = nil then
     Exit;
+  // While Testing
+  ApplicationFlagThreadMsg('CheckBusyOnConnect ' + AContext.CtxTextId);
   Try
     IpStr := AContext.TcpRef.Address;
-    FBusyLock.Enter;
-    try
-      if CurrentAddresses.Find(IpStr, IpIdx) then
-      Begin
-        if fCurrentAddresses.Objects[IpIdx] is TBusyCheckCalls then
-          IObj := TBusyCheckCalls(fCurrentAddresses.Objects[IpIdx])
+    IF BusyLockTryEnter then
+      try
+        if CurrentAddresses.Find(IpStr, IpIdx) then
+        Begin
+          if FCurrentAddresses.Objects[IpIdx] is TBusyCheckCalls then
+            IObj := TBusyCheckCalls(FCurrentAddresses.Objects[IpIdx])
+          else
+            IObj := nil;
+        end
         else
-          IObj := nil;
-      end
-      else
-      begin
-        IObj := TBusyCheckCalls.Create(FTimeLimitFor80Calls, IpStr);
-        fCurrentAddresses.AddObject(IpStr, IObj);
+        begin
+          IObj := TBusyCheckCalls.Create(FTimeLimitFor80Calls, IpStr);
+          FCurrentAddresses.AddObject(IpStr, IObj);
+        end;
+      finally
+        BusyLockRelease;
       end;
-      if IObj <> nil then
-        if not IObj.NotTooBusy(FTimeLimitFor80Calls) then
-          AddLogMessage(IpStr, 'Too Busy');
-    finally
-      FBusyLock.Release;
-    end;
+
+    if IObj <> nil then
+      if not IObj.NotTooBusy(FTimeLimitFor80Calls) then
+        ISIndyUtilsException(Self, IpStr + ' Too Busy');
   Except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'CheckBusyOnConnect');
@@ -601,7 +759,6 @@ begin
         ISIndyUtilsException(Self, ASession.TextID +
           '# Svr Busy FcountTo80 too early by ' + LocalAllocationTime.Subtract
           (TM).ToString);
-        AddLogMessage(ASession.TextID, 'Too Busy');
         ISIndyUtilsException(Self, '#Svr Busy will Release in ' +
           LocalAllocationTime.Subtract(TM).ToString);
         while TM < LocalAllocationTime do
@@ -630,41 +787,66 @@ Var
   ThisSession: TISIndyTCPSvrSession;
   Msg: string;
   LocalList: TList;
-  Idx: Integer;
+  LCurSessionObjList: TList;
+  LRegList: TStringList;
+  Idx, LblIdx: Integer;
 begin
   Try
+    if FServerClosing then
+      Exit;
+
+    ApplicationFlagThreadMsg('CloseInactiveSessions');
     FDoNextCloseEvent := now + 1 / 24;
-    if fCurrentSessionObjects = nil then
+    if FCurrentSessionObjects = nil then
       Exit;
     LocalList := TList.Create;
     try
-      // Not Locking the list but not changin it??
-      for Idx := 0 to fCurrentSessionObjects.Count - 1 do
-        if fCurrentSessionObjects[Idx] <> nil then
-          if TObject(fCurrentSessionObjects[Idx]) is TISIndyTCPSvrSession then
-          Begin
-            ThisSession := TISIndyTCPSvrSession(fCurrentSessionObjects[Idx]);
-            if (FListOfRegConnections <> nil) and
-              (ThisSession.FCoupledSession is TISIndyTCPSvrSession) then
-            begin
-              if ThisSession.IsTimedOut then
-              Begin
-                if FListOfRegConnections.IndexOfObject(ThisSession) < 0 then
-                  LocalList.Add(ThisSession);
-              end
-              else
-              begin
-                Msg := '#Label ' + FListOfRegConnections
-                  [FListOfRegConnections.IndexOfObject(ThisSession)] +
-                  ' Connection Timed Out ' + ThisSession.PortID;
-                if GblRptTimeoutClear then
-                  ISIndyUtilsException(Self, Msg);
-                LocalList.Add(ThisSession);
-              end;
-            end
-            else If ThisSession.IsTimedOut then
-              LocalList.Add(ThisSession);
+      if not ApSrvrListLockTryEnter('CloseInactiveSessions', 2) then
+        Exit;
+      try
+        LCurSessionObjList := FCurrentSessionObjects.LockList;
+        try
+          LRegList := ListOfRegConnections.Lock;
+          try
+            for Idx := 0 to LCurSessionObjList.Count - 1 do
+              if LCurSessionObjList[Idx] <> nil then
+                if TObject(LCurSessionObjList[Idx]) is TISIndyTCPSvrSession then
+                Begin
+                  ThisSession := TISIndyTCPSvrSession(LCurSessionObjList[Idx]);
+                  if (ThisSession.FCoupledSession is TISIndyTCPSvrSession) then
+                  begin
+                    if ThisSession.IsTimedOut then
+                    Begin
+                      if LRegList.IndexOfObject(ThisSession) < 0 then
+                        LocalList.Add(ThisSession);
+                    end
+                    else
+                    begin
+                      LblIdx := LRegList.IndexOfObject(ThisSession);
+                      if LblIdx > -1 then
+                      Begin
+                        Msg := '#Label ' + LRegList[LblIdx] +
+                          ' Connection Timed Out ' + ThisSession.PortId;
+                        if GblRptTimeoutClear then
+                          ISIndyUtilsException(Self, Msg);
+                      End;
+                      LocalList.Add(ThisSession);
+                    end;
+                  end
+                  else If ThisSession.IsTimedOut then
+                    LocalList.Add(ThisSession);
+                end;
+          finally
+            FListOfRegConnections.Unlock;
           end;
+        finally
+          FCurrentSessionObjects.UnlockList;
+        end;
+      finally
+        ApSrvrListLockRelease('CloseInactiveSessions');
+      end;
+
+      ApplicationFlagThreadMsg('CloseInactiveSessions Local List');
 
       for Idx := LocalList.Count - 1 downto 0 do
         // Go backwards as sessions may be delaeted
@@ -682,6 +864,7 @@ begin
             End;
     Finally
       LocalList.Free;
+      ApplicationFlagThreadMsg('CloseInactiveSessions Free Local List');
     End;
   Except
     On E: Exception do
@@ -695,42 +878,147 @@ procedure TIsIndyApplicationServer.ConfirmRegisteredConnections;
 Var
   i: Integer;
   ConObj, CplObj: TISIndyTCPSvrSession;
+  FollowOn: TISIndyTCPBase;
+  ListToDo: TStringList;
+  // LCurSessionObj: TList;
+  LRegList: TStringList;
+
 begin
-  if FListOfRegConnections = nil then
-    Exit;
-  for i := 0 to FListOfRegConnections.Count - 1 do
-    if FListOfRegConnections.Objects[i] is TISIndyTCPSvrSession then
-    Begin
-      ConObj := TISIndyTCPSvrSession(FListOfRegConnections.Objects[i]);
-      if (ConObj.FCoupledSession <> nil) then
-        if (ConObj.FCoupledSession is TISIndyTCPSvrSession) then
-        Begin
-          CplObj := ConObj.FCoupledSession as TISIndyTCPSvrSession;
-          if CplObj.IsTimedOut(false) then
-          Begin
-            ConObj.FCoupledSession := nil;
-            CplObj.FCoupledSession := nil;
+  Try
+    ListToDo := TStringList.Create;
+    Try
+      ListToDo.OwnsObjects := false;
+      if FListOfRegConnections = nil then
+        Exit;
+      If Not ApSrvrListLockTryEnter('ConfirmRegisteredConnections', 2) Then
+      Begin
+        Inc(FLogsMissed);
+        Exit;
+      end;
+      // else
+      // LCurSessionObj: TList;
+      Try
+        LRegList := FListOfRegConnections.Lock;
+        Try
+          for i := 0 to LRegList.Count - 1 do
+            Try
+              if LRegList.Objects[i] is TISIndyTCPSvrSession then
+                Try
+                  ListToDo.AddObject(LRegList[i], LRegList.Objects[i]);
+                Except
+                  On E: Exception do
+                  begin
+                    ISIndyUtilsException(Self, E,
+                      'Confirm#RegisteredConnections Add I=' + IntToStr(i));
+                    WritelnIfPossible
+                      (' ConfirmRegisteredConnections Exception :' + E.Message +
+                      ' Add I=' + IntToStr(i));
+                  end
+                End;
+            Except
+              On E: Exception do
+              begin
+                ISIndyUtilsException(Self, E, 'Confirm#RegisteredConnections I='
+                  + IntToStr(i));
+                WritelnIfPossible(' ConfirmRegisteredConnections Exception :' +
+                  E.Message + ' I=' + IntToStr(i));
+              end
+            End;
+        finally
+          FListOfRegConnections.Unlock;
+        End;
+      finally
+        ApSrvrListLockRelease('ConfirmRegisteredConnections');
+      end;
+
+      for i := 0 to ListToDo.Count - 1 do
+        try
+          if ListToDo.Objects[i] is TISIndyTCPSvrSession then
+          begin
+            ConObj := ListToDo.Objects[i] as TISIndyTCPSvrSession;
+            if (ConObj.FCoupledSession <> nil) then
+            Begin
+              // while testing
+              // ApplicationFlagThreadMsg(Self, 'ConObj.FCoupledSession <> nil ' +
+              // ConObj.TextID);
+              if (ConObj.FCoupledSession is TISIndyTCPSvrSession) then
+              Begin
+                CplObj := ConObj.FCoupledSession as TISIndyTCPSvrSession;
+                if CplObj <> nil then
+                  if CplObj.IsTimedOut(false) then
+                  Begin
+                    if GblRptTimeoutClear then
+                      ApplicationFlagThreadMsg(Self, 'CplObj.IsTimedOut');
+                    // while testing
+                    ApplicationFlagThreadMsg(Self, 'CplObj.IsTimedOut');
+
+                    ConObj.FCoupledSession := nil;
+                    CplObj.FCoupledSession := nil;
+                  end
+                  else If CplObj.FCoupledSession <> ConObj then
+                    ConObj.FCoupledSession := nil;
+              end
+              Else if (ConObj.FCoupledSession is TISIndyTCPBase) then
+              begin
+                FollowOn := ConObj.FCoupledSession;
+                if FollowOn <> nil then
+                  if FollowOn.FCoupledSession <> ConObj Then
+                  Begin
+                    ConObj.FCoupledSession := nil;
+                    FollowOn.FCoupledSession := nil;
+                    ApplicationFlagThreadMsg(Self,
+                      'FollowOn.FCoupledSession <> ConObj');
+                  End;
+              End
+              else
+                ISIndyUtilsException(Self,
+                  'ConfirmRegisteredConnections Must not Be so');
+            End;
+          End;
+        Except
+          On E: Exception do
+          begin
+            ISIndyUtilsException(Self, E, 'Confirm#RegisteredConnections');
+            WritelnIfPossible(' ConfirmRegisteredConnections Exception :' +
+              E.Message);
           end
-          else If CplObj.FCoupledSession <> ConObj then
-            ConObj.FCoupledSession := nil;
         end;
+      ApplicationFlagThreadMsg
+        ('Completed ConfirmRegisteredConnections no exception');
+    finally
+      FreeAndNil(ListToDo);
     end;
+  Except
+    On E: Exception do
+    Begin
+      ISIndyUtilsException(Self, E, 'Confirm#RegisteredConnections Outer');
+      WritelnIfPossible(' ConfirmRegisteredConnections Outer Loop Exception :' +
+        E.Message);
+      ApplicationFlagThreadMsg
+        ('ConfirmRegisteredConnections Outer Loop Exception')
+    End;
+  End;
 end;
 
 constructor TIsIndyApplicationServer.Create(AOwner: TComponent);
 Var
   LogStart: String;
 begin
+  ApplicationFlagThreadMsg('Server Create');
   FSrvrStopWatch := TStopwatch.StartNew;
   FServerClosing := false;
   // Four Seconds;
   FTimeLimitFor80Transactions := cStart80TransactionAllowence;
-  FListLock := TCriticalSection.Create;
+  FApSrvrListLock := TCriticalSection.Create;
+  If ApSrvrListLockTryEnter('Create Thread', 2) then
+    ApSrvrListLockRelease('Create');
   FBusyLock := TCriticalSection.Create;
   Inherited;
   ContextClass := TIsIndyTCPServerContext;
   OnConnect := IsIdTCPSrvrConnect;
   OnExecute := IsIdTCPSvrSessionExecute;
+  OnException := ISIdSrvThrdException;
+
   // OnContextCreated := IsIdTCPSrvrContextCreated;
   MaxCallsPerMinute := 800;
   ISIndyUtilsException(Self,
@@ -742,15 +1030,21 @@ begin
     + IntToStr(MaxCallsPerMinute) + crlf + 'Session Idle Timeout =' +
     FIdleTimePermitted.ToString;
   ISIndyUtilsException(Self, LogStart);
-  LogStart :='Global Log Settings'+Crlf+
-    ReportLoggingStatus;
+  LogStart := 'Global Log Settings' + crlf + ReportLoggingStatus;
   ISIndyUtilsException(Self, LogStart);
 
   if Assigned(GlobalCountOfComsObjectTypes) then
     GlobalCountOfComsObjectTypes.CountComsTypes(Self, True);
 
-  Sleep(1000); //before cleanup starts
-  FCleanupThread.Resume;
+  Sleep(1000); // before cleanup starts
+  If FCleanupThread <> nil then
+    FCleanupThread.Resume;
+{$IFDEF Debug}
+  AllowNoPersonality := True;
+  // Allows connections using cNoPersonality without
+  // knowledge of cApplicationHandshakeCodeString
+{$ENDIF}
+  TSingletonObjTimeSpanRecording.RecordObjectOnCreate(Self);
 end;
 
 function TIsIndyApplicationServer.CurrentAddressDetails: String;
@@ -758,72 +1052,102 @@ var
   BObj: TBusyCheckCalls;
   i: Integer;
 begin
-  Result := '';
-  if fCurrentAddresses = nil then
-    Exit;
-  if fCurrentAddresses.Count < 1 then
-    Exit;
+  try
+    Result := '';
+    if FCurrentAddresses = nil then
+      Exit;
+    if FCurrentAddresses.Count < 1 then
+      Exit;
 
-  for i := 0 to fCurrentAddresses.Count - 1 do
-  begin
-    if fCurrentAddresses.Objects[i] is TBusyCheckCalls then
+    for i := 0 to FCurrentAddresses.Count - 1 do
     begin
-      BObj := TBusyCheckCalls(fCurrentAddresses.Objects[i]);
-      Result := Result + BObj.TextData + crlf;
-    End
-    Else
-      Result := Result + fCurrentAddresses[i] + crlf;
+      if FCurrentAddresses.Objects[i] is TBusyCheckCalls then
+      begin
+        BObj := TBusyCheckCalls(FCurrentAddresses.Objects[i]);
+        Result := Result + BObj.TextData + crlf;
+      End
+      Else
+        Result := Result + FCurrentAddresses[i] + crlf;
+    end;
+  Except
+    On E: Exception do
+    Begin
+      WritelnIfPossible('CurrentAddressDetails Exception ' + E.Message);
+      ISIndyUtilsException(Self, E, '#CurrentAddressDetails')
+    End;
   end;
 end;
 
 function TIsIndyApplicationServer.CurrentAddresses: TStringList;
 begin
-  if fCurrentAddresses = nil then
+  if FCurrentAddresses = nil then
   begin
-    fCurrentAddresses := TStringList.Create;
-    fCurrentAddresses.Sorted := True;
-    fCurrentAddresses.OwnsObjects := True;
+    FCurrentAddresses := TStringList.Create;
+    FCurrentAddresses.Sorted := True;
+    FCurrentAddresses.OwnsObjects := True;
     // TBusyCheckCalls
   end;
-  Result := fCurrentAddresses;
+  Result := FCurrentAddresses;
+end;
+
+function TIsIndyApplicationServer.CurrentlyReset: Boolean;
+begin
+  Result := FResetStartTime > now;
 end;
 
 destructor TIsIndyApplicationServer.Destroy;
 begin
   Try
     Try
+      ApplicationFlagThreadMsg('Destroying Server');
+
+      if FCleanupThread <> nil then
+        Try
+          FCleanupThread.FOwner := nil;
+          FCleanupThread.Terminate;
+        Except
+          On E: Exception do
+            ISIndyUtilsException(Self, E, 'Destroy 2');
+        End;
+
+      if Active then
+        Active := false; // shutdown
       if Assigned(GlobalCountOfComsObjectTypes) then
         GlobalCountOfComsObjectTypes.CountComsTypes(Self, false);
       ISIndyUtilsException(Self, 'Start Destroy Server: ');
       ISIndyUtilsException('', ServerDetailsAsText);
     Except
+      On E: Exception do
+        ISIndyUtilsException(Self, E, 'Destroy 1');
     End;
-    FCleanupThread.Terminate;
-    DropAllCurrentSessions;
-    ISIndyUtilsException(Self, 'DropAllSessions');
-    fCurrentSessionObjects.Free;
+
+    try
+      inherited; // will drop contexts and they own sessions
+    except
+      On E: Exception do
+        ISIndyUtilsException(Self, E, 'Destroy.Inherited');
+    end;
+    // inherited;    //will drop contexts and they own sessions
+    // DropAllCurrentSessions;
+
+    FCurrentSessionObjects.Free;
+    ISIndyUtilsException(Self, 'fCurrentSessionObjects.Free;');
     FListOfRegConnections.Free;
     ISIndyUtilsException(Self, 'FListOfRegConnections.Free;');
-    fCurrentAddresses.Free; // Owns Objects;
+    FCurrentAddresses.Free; // Owns Objects;
     ISIndyUtilsException(Self, 'fCurrentAddresses.Free;');
     FLogList.Free;
-    FListLock.Free;
+    FApSrvrListLock.Free;
     FBusyLock.Free;
     ISIndyUtilsException(Self, 'FBusyLock.Free;');
-    // FreeSListWObjects(fCurrentAddresses);
-    // fCurrentAddresses:=nil;
+
   except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'TIsIndyApplicationServer.Destroy');
   end;
-  try
-    inherited;
-  except
-    On E: Exception do
-      ISIndyUtilsException(Self, E, 'Destroy.Inherited');
-  end;
+
   if FCleanupThread <> nil then
-    Sleep(5000);
+    Sleep(1000);
   TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
     FSrvrStopWatch.Elapsed);
 end;
@@ -831,93 +1155,198 @@ end;
 procedure TIsIndyApplicationServer.DropAllCurrentSessions;
 Var
   ThisObj: TISIndyTCPSvrSession;
+  LCurSessionObjs: TList;
+  LoopChk: Integer;
 begin
-  if fCurrentSessionObjects <> nil then
-    While fCurrentSessionObjects.Count > 0 do
-    Begin
-      FListLock.Acquire;
-      Try
-        if TObject(fCurrentSessionObjects[0]) is TISIndyTCPSvrSession then
-          ThisObj := TISIndyTCPSvrSession(fCurrentSessionObjects[0])
-        else
-          ThisObj := nil;
-      finally
-        FListLock.Release;
-      end;
-      if ThisObj <> nil then
-        ThisObj.CloseConnection;
-      Sleep(100);
+  if FCurrentSessionObjects <> nil then
+    If Not ApSrvrListLockTryEnter('DropAllCurrentSessions', 2) Then
+      Exit;
+
+  // else
+  Try
+    LoopChk := 1000;
+    LCurSessionObjs := FCurrentSessionObjects.LockList;
+    Try
+      While (LCurSessionObjs.Count > 0) and (LoopChk > 0) do
+        Try
+          Dec(LoopChk);
+          if TObject(LCurSessionObjs[0]) is TISIndyTCPSvrSession then
+            ThisObj := TISIndyTCPSvrSession(LCurSessionObjs[0])
+          else
+            ThisObj := nil;
+          Try
+            if ThisObj <> nil then
+              ApplicationFlagThreadMsg('DropAllCurrentSessions Object=' +
+                ThisObj.TextID)
+            else
+              ApplicationFlagThreadMsg('DropAllCurrentSessions nil Object');
+          Except
+            On E: Exception do
+              ISIndyUtilsException(Self, E, 'DropAllCurrentSessions');
+          End;
+
+          LCurSessionObjs[0] := nil;
+          LCurSessionObjs.Delete(0);
+
+          if ThisObj <> nil then
+          begin
+            // while testing
+            // if GblRptRegConnectiononSrvr then
+            ApplicationFlagThreadMsg('Dropping session ' + ThisObj.PortId);
+            ThisObj.CloseConnection;
+            ThisObj := nil;
+            FreeAndNil(ThisObj); // Freed in CloseConnection
+          end;
+          Sleep(100);
+        Except
+          On E: Exception do
+            ISIndyUtilsException(Self, E, 'DropAllCurrentSessions');
+        End;
+    Finally
+      FCurrentSessionObjects.UnlockList;
     end;
-  FreeAndNil(fCurrentSessionObjects);
+  finally
+    ApSrvrListLockRelease('DropAllCurrentSessions');
+  end;
+  FreeAndNil(FCurrentSessionObjects);
 end;
 
 procedure TIsIndyApplicationServer.DropRegConnection
   (AConnection: TISIndyTCPSvrSession);
 Var
   Index: Integer;
+  Id: AnsiString;
+  RegObjs: TStringList;
+
 begin
   if AConnection = nil then
     Exit;
-  if GblRptRegConnectiononSrvr then
-    ISIndyUtilsException(Self, '#DropRegConnection::' + AConnection.PortID);
+  Id := AConnection.PortId + ' :: ' + AConnection.FRegisteredAs;
+  // while testing
+  // if GblRptRegConnectiononSrvr then
+  ApplicationFlagThreadMsg('DropRegConnection:: ' + Id);
+
   If FListOfRegConnections = nil Then
     Exit;
-  FListLock.Acquire;
-  Try
-    Index := FListOfRegConnections.IndexOfObject(AConnection);
-    if Index >= 0 then
-    begin
-      if GblRptRegConnectiononSrvr then
-        ISIndyUtilsException(Self, '#DropRegConnection::' +
-          FListOfRegConnections[Index]);
-      FListOfRegConnections.Delete(Index);
+
+  If ApSrvrListLockTryEnter('DropRegConnection', 2) then
+    Try
+      RegObjs := FListOfRegConnections.Lock;
+      Try
+        Index := RegObjs.IndexOfObject(AConnection);
+        if Index >= 0 then
+        begin
+          // while testing
+          // if GblRptRegConnectiononSrvr then
+          ApplicationFlagThreadMsg('DropRegConnection Index=' + IntToStr(Index)
+            + ' :: ' + Id);
+          RegObjs.Delete(Index);
+        end;
+      finally
+        FListOfRegConnections.Unlock;
+      end;
+    Finally
+      ApSrvrListLockRelease('DropRegConnection');
     end;
-  Finally
-    FListLock.Release;
-  end;
 end;
 
 procedure TIsIndyApplicationServer.DropSession(ASession: TISIndyTCPSvrSession);
 Var
   Idx: Integer;
+  SessionContext: TIsIndyTCPServerContext;
+  LCurSessionObjs: TList;
+  LRegObjs: TStringList;
 begin
+  // While Testing
+  if ASession = nil then
+    ApplicationFlagThreadMsg(Self, 'DropSession ASession=nil');
+
+  if ASession = nil then
+    Exit;
+
   Try
     if ASession.FServerObject = Self then
-      ASession.FServerObject := nil;
+      ASession.FServerObject := nil
+    Else
+      ApplicationFlagThreadMsg('Wrong Server in Drop Session:');
 
-    FListLock.Acquire;
-    Try
-      DropRegConnection(ASession);
-      Dec(FServerTcpSessions);
-      if fCurrentSessionObjects = nil then
-        Exit;
-      if fCurrentSessionObjects = nil then
-        Idx := -1
-      Else
-        Idx := fCurrentSessionObjects.IndexOf(ASession);
-      if Idx < 0 then
-        ISIndyUtilsException(Self, 'Session not found')
-      else
-      begin
-        fCurrentSessionObjects[Idx] := nil;
-        fCurrentSessionObjects.Delete(Idx);
+    If ApSrvrListLockTryEnter('DropSession', 2) then
+      Try
+        SessionContext := ASession.FServerContext;
+        if SessionContext <> nil then
+        Begin
+          SessionContext.FSessionClosing := True;
+          If SessionContext.FTcpRef <> ASession then
+            ApplicationFlagThreadMsg('Wrong Context in Drop Session:');
+          // Else
+          // SessionContext.FTcpRef := nil;
+        End
+        Else
+          ApplicationFlagThreadMsg('No Context in Drop Session:');
+
+        ASession.FServerContext := nil;
+
+        DropRegConnection(ASession);
+        Dec(FServerTcpSessions);
+
+        if FCurrentSessionObjects = nil then
+          Exit;
+
+        LCurSessionObjs := FCurrentSessionObjects.LockList;
+        try
+          if FListOfRegConnections <> nil then
+            LRegObjs := FListOfRegConnections.Lock
+          else
+            LRegObjs := nil;
+          try
+            if LCurSessionObjs = nil then
+              Idx := -1
+            Else
+              Idx := LCurSessionObjs.IndexOf(ASession);
+            if Idx < 0 then
+              ISIndyUtilsException(Self, 'Session not found')
+            else
+            begin
+              LCurSessionObjs[Idx] := nil;
+              LCurSessionObjs.Delete(Idx);
+            end;
+
+            if LRegObjs = nil then
+              Idx := -1
+            Else
+              Idx := LRegObjs.IndexOfObject(ASession);
+            // While Testing
+
+            if Idx < 0 then
+              // While Testing
+              ApplicationFlagThreadMsg
+                ('DropSession FListOfRegConnections Index < 0')
+            else if Idx >= LRegObjs.Count then
+              // While Testing
+              ApplicationFlagThreadMsg
+                ('DropSession FListOfRegConnections Index ' + IntToStr(Idx) +
+                ' Exceeds ' + IntToStr(LRegObjs.Count))
+            else
+            begin
+              LRegObjs.Objects[Idx] := nil;
+              LRegObjs.Delete(Idx);
+            end;
+          Finally
+            if FListOfRegConnections <> nil then
+              FListOfRegConnections.Unlock
+          end;
+        Finally
+          FCurrentSessionObjects.UnlockList;
+        end;
+      Finally
+        ApSrvrListLockRelease('DropSession');
       end;
-      if FListOfRegConnections = nil then
-        Idx := -1
-      Else
-        Idx := FListOfRegConnections.IndexOfObject(ASession);
-      if Idx < 0 then
-      else
-      begin
-        FListOfRegConnections.Objects[Idx] := nil;
-        FListOfRegConnections.Delete(Idx);
-      end;
-    Finally
-      FListLock.Release;
-    end;
   Except
     On E: Exception do
+    begin
+      WritelnIfPossible('Exception in Drop Session:' + E.Message);
       ISIndyUtilsException(Self, E, ' Drop Session');
+    end;
   end;
 end;
 
@@ -932,11 +1361,18 @@ function TIsIndyApplicationServer.GetRegConnectionFor(ARegString: AnsiString)
   : TISIndyTCPBase;
 Var
   Inx: Integer;
+  LRegList: TStringList;
 begin
+  ApplicationFlagThreadMsg('GetRegConnectionFor ' + ARegString);
   Result := nil;
   Try
-    If ListOfRegConnections.Find(ARegString, Inx) then
-      Result := FListOfRegConnections.Objects[Inx] as TISIndyTCPBase;
+    LRegList := ListOfRegConnections.Lock;
+    try
+      If LRegList.Find(ARegString, Inx) then
+        Result := LRegList.Objects[Inx] as TISIndyTCPBase;
+    finally
+      FListOfRegConnections.Unlock;
+    end;
   Except
     Result := nil;
   end;
@@ -948,29 +1384,42 @@ Var
   i: Integer;
   Obj: TObject;
   ThisObj: TISIndyTCPSvrSession;
+  LCurList: TList;
 begin
   Result := nil;
   if APeerPortNo < 1 then
     Exit;
-  if fCurrentSessionObjects = nil then
+  if FCurrentSessionObjects = nil then
     Exit;
   i := 0;
-  if FListLock.TryEnter then
+  if ApSrvrListLockTryEnter('GetSessionByCallingPort', 2) then
     try
-      while (i < fCurrentSessionObjects.Count) and (Result = nil) do
-      begin
-        Obj := fCurrentSessionObjects[i];
-        if Obj is TISIndyTCPSvrSession then
-        Begin
-          ThisObj := TISIndyTCPSvrSession(Obj);
-          if ThisObj.Port = APeerPortNo then
-            Result := ThisObj;
+      LCurList := FCurrentSessionObjects.LockList;
+      try
+        while (i < LCurList.Count) and (Result = nil) do
+        begin
+          Obj := LCurList[i];
+          if Obj is TISIndyTCPSvrSession then
+          Begin
+            ThisObj := TISIndyTCPSvrSession(Obj);
+            if ThisObj.Port = APeerPortNo then
+              Result := ThisObj;
+          end;
+          Inc(i);
         end;
-        Inc(i);
-      end;
+      Finally
+        FCurrentSessionObjects.UnlockList;
+      end
     finally
-      FListLock.Leave;
-    end;
+      ApSrvrListLockRelease('GetSessionByCallingPort');
+    end
+  Else
+  begin
+    WritelnIfPossible('GetSessionByCallingPort no Lock:Port=' +
+      IntToStr(APeerPortNo));
+    ISIndyUtilsException(Self, 'GetSessionBy#CallingPort no Lock:Port=' +
+      IntToStr(APeerPortNo));
+  end
 end;
 
 procedure TIsIndyApplicationServer.IsIdTCPSvrSessionExecute
@@ -980,93 +1429,131 @@ Var
   LConnection: TIdTCPConnection;
   TcpCtxSession: TISIndyTCPSvrSession;
 begin
-  if AContext = nil then
-    Exit;
-  TcpCtxSession := nil;
-  LContext := LocalContext(AContext);
   Try
-    if LContext = nil then
-      ISIndyUtilsException(Self, '#IsIdTCPSvrSessionExecute Nil Local Context')
-    else
-      TcpCtxSession := LContext.RawTcpRef;
-
-    if TcpCtxSession = nil then
-    begin
-      ISIndyUtilsException(Self, '#IsIdTCPSvrSessionExecute Nil TcpCtx');
+    if AContext = nil then
       Exit;
-    end;
-
-    LConnection := LContext.Connection;
-    if TcpCtxSession.FConnection <> LConnection then
-    begin
-      if LConnection = nil then
-        ISIndyUtilsException(Self,
-          '#IsIdTCPSvrSessionExecute Context Nil Connection')
-      else
-        ISIndyUtilsException(Self, '#IsIdTCPSvrSessionExecute Wrong TcpCtx ::' +
-          TcpCtxSession.TextID);
-      Exit;
-    end;
-
-    if LConnection <> nil then
-      // while LConnection.Connected do
-      if LConnection.Connected then
+    TcpCtxSession := nil;
+    LConnection := nil;
+    LContext := LocalContext(AContext);
+    Try
+      if LContext = nil then
       begin
-        if FResetStartTime > 0 then
-          if FResetStartTime < now then
-            FResetStartTime := 0.0
-          else
-          begin
-            ISIndyUtilsException(Self, '# Closing ResetStartTime=' +
-              FormatDateTime('dd hh:nn:ss.zzz', FResetStartTime));
-            LConnection.Disconnect;
-            Sleep(1000);
-            Exit;
-          end;
-        if TcpCtxSession <> nil then
-          If not TcpCtxSession.ProcessNextSrvrTransaction Then
-          Begin
-            if GblLogAllChlOpenClose then
-            begin
-              ISIndyUtilsException(Self, TcpCtxSession.PortID +
-                '# End Session');
-            end;
-            TcpCtxSession.CloseGracefully;
-            Sleep(1000);
-          end;
+        ApplicationFlagThreadMsg
+          ('IsIdTCPSvrSessionExecute Nil Local Context ACtxt Type=');
+        ISIndyUtilsException(Self,
+          '#IsIdTCPSvrSessionExecute Nil Local Context');
+        Exit;
+      end
+      else
+        TcpCtxSession := LContext.RawTcpRef;
+
+      if TcpCtxSession = nil then
+      begin
+        LContext.FSessionClosing := True;
+        ISIndyUtilsException(Self, '#IsIdTCPSvrSessionExecute Nil TcpCtx');
+        Exit;
       end;
-  Except
-    On E: Exception do
-    Begin
-      Try
-        ISIndyUtilsException(Self, E, 'Is#IdTCPSvrSessionExecute');
-        if LConnection <> nil then
+
+      LConnection := LContext.Connection;
+      if TcpCtxSession.FConnection <> LConnection then
+      begin
+        // 14:46:02 TIsIndyApplicationServer::IsIdTCPSvrSessionExecute Wrong TcpCtx ::Svr:1559 Disconnected <192.168.20.6>:50664        LContext.FSessionClosing := True;
+        ApplicationFlagThreadMsg('IsIdTCPSvrSessionExecute');
+        if LConnection = nil then
+          ISIndyUtilsException(Self,
+            '#IsIdTCPSvrSessionExecute Context Nil Connection')
+        else if TcpCtxSession = nil then
+          ISIndyUtilsException(Self, '#IsIdTCPSvrSessionExecute Wrong TcpCtx ::'
+            + ' No TcpCtxSession.TextID')
+        else
+          ISIndyUtilsException(Self, '#IsIdTCPSvrSessionExecute Wrong TcpCtx ::'
+            + TcpCtxSession.TextID);
+      end;
+
+      if (LConnection = nil) or (TcpCtxSession = nil) then
+      Begin
+        LContext.FSessionClosing := True;
+        Exit;
+      end;
+
+      if LConnection <> nil then
+        if LConnection.Connected then
         begin
-          If LConnection.IOHandler <> nil then
-            LConnection.IOHandler.CloseGracefully;
-        end
-        else if LContext <> nil then
-          if LContext.Connection <> nil then
-            if LContext.Connection.IOHandler <> nil then
-              LContext.Connection.IOHandler.CloseGracefully;
-      Except
-        On ee: Exception do
-          try
-            ISIndyUtilsException(Self, ee,
-              'IsIdTCPSvrSessionExecute #Double Exception');
-          Except
-          end;
+          if FResetStartTime > 0 then
+            if FResetStartTime < now then
+              FResetStartTime := 0.0
+            else
+            begin
+              ISIndyUtilsException(Self, '# Closing ResetStartTime=' +
+                FormatDateTime('dd hh:nn:ss.zzz', FResetStartTime));
+              LContext.FSessionClosing := True;
+              Exit;
+            end;
+
+          if TcpCtxSession <> nil then
+            If not TcpCtxSession.ProcessNextSrvrTransaction Then
+            Begin
+              if GblLogAllChlOpenClose then
+                ApplicationFlagThreadMsg(Self, TcpCtxSession.PortId +
+                  '# End Session');
+              LContext.FSessionClosing := True;
+              // TcpCtxSession.CloseIsObjGracefully;
+            end;
+        end;
+    Except
+      On E: Exception do
+      Begin
+        Try
+          ISIndyUtilsException(Self, E, 'Is#IdTCPSvrSessionExecute');
+          ApplicationFlagThreadMsg('IsIdTCPSvrSessionExecute Exception ::' +
+            E.Message);
+          if LContext <> nil then
+            LContext.FSessionClosing := True;
+        Except
+          On ee: Exception do
+            try
+              ISIndyUtilsException(Self, ee,
+                'IsIdTCPSvrSessionExecute #Double Exception');
+            Except
+            end;
+        end;
       end;
-    end;
+    End;
+  Except
+    On eo: Exception do
+      try
+        ISIndyUtilsException(Self, eo,
+          'IsIdTCPSvrSessionExecute #Outer Loop Exception');
+        ApplicationFlagThreadMsg
+          ('IsIdTCPSvrSessionExecute #Outer Loop Exception::' + eo.Message);
+      Except
+      end;
   End;
 End;
+
+procedure TIsIndyApplicationServer.ISIdSrvThrdException(AContext: TIdContext;
+  AException: Exception);
+Var
+  s: string;
+begin
+  if AContext is TIsIndyTCPServerContext then
+    s := TIsIndyTCPServerContext(AContext).CtxTextId + ':: Exception =' +
+      AException.Message
+  Else
+    s := 'ISIdSrvThrdException =' + AException.Message;
+  ApplicationFlagThreadMsg(s);
+  raise EExceptionIsComsNotExpected.Create(s);
+end;
 
 procedure TIsIndyApplicationServer.IsIdTCPSrvrConnect(AContext: TIdContext);
 Var
   LContext: TIsIndyTCPServerContext;
   ThisSession: TISIndyTCPSvrSession;
 begin
+  // Runs in TIdListenerThread (One per ListenerPort IP4,IP6)
+  // Must exit before further connections can open
   Try
+    ApplicationFlagThreadMsg('Connect to server');
     LContext := LocalContext(AContext);
 
     LContext.ReleaseOldRef;
@@ -1075,37 +1562,43 @@ begin
 
     ThisSession.FServerObject := Self;
     Inc(FServerTcpSessions);
-    ThisSession.OnLogMsg := AddLogMessage;
     ThisSession.OnAnsiStringAction := OnSessionAnsiStringAction;
     ThisSession.OnStringAction := OnSessionStringAction;
     ThisSession.OnSimpleRemoteAction := OnSessionSimpleRemoteAction;
-    if GblRptMakeConnectionOnSrvr then
-    Begin
-      ISIndyUtilsException(Self, ThisSession.PortID + '# On Connect::' +
-        IntToStr(FServerTcpSessions)+' FServerTcpSessions');
-    End;
+    // while testing
+    // if GblRptRegConnectiononSrvr then
+    ApplicationFlagThreadMsg(ThisSession.PortId + ' On Connect: : ');
+    // while testing
+    ApplicationFlagThreadMsg(ThisSession.PortId + ' Confirm Scheduler Thread');
+
     if FResetStartTime > 0.01 then
       if FResetStartTime > now then
         FResetStartTime := 0.0
       else
-        LContext.FTcpRef.CloseGracefully;
-    // accept no calls in reset period;
+      Begin
+        ISIndyUtilsException(Self, LContext.FTcpRef.TextID +
+          '# Failed Connect due ResetStartTime');
+        LContext.FSessionClosing := True;
+        // accept no calls in reset period;
+        Exit;
+      End;
 
     if FResetStartTime < 0.001 then
       If ThisSession.AcceptStart then
       Begin
         if GblLogAllChlOpenClose then
-        begin
-          ISIndyUtilsException(Self, LContext.FTcpRef.TextID + '# Run Channel');
-        end;
+          ApplicationFlagThreadMsg(LContext.FTcpRef.TextID + ' Run Channel');
       end
       else
-        LContext.FTcpRef.CloseGracefully;
+      Begin
+        ApplicationFlagThreadMsg(LContext.FTcpRef.TextID + ' Failed Connect');
+        LContext.FSessionClosing := True;
+      end;
   Except
     On E: Exception do
     Begin
       ISIndyUtilsException(Self, E, 'IsIdTCPSrvrConnect');
-      AddLogMessage('Server', 'OnConnect Error:' + E.Message);
+      ApplicationFlagThreadMsg('Connect to server exception');
     end;
   end;
 end;
@@ -1150,9 +1643,16 @@ Var
   LinkToReg, ThisReg, ThatReg: AnsiString;
   Ary: TArrayOfAnsiStrings;
   LenAry, i, ThisRegIdx: Integer;
+  LRegConLst: TStringList;
+
 begin
   Try
     Result := cIsLinkedOnServer + 'CE#'; // CoupleError
+    if ASession = nil then
+      ApplicationFlagThreadMsg('LinkStatusAsResponse Nil ASession')
+    Else
+      ApplicationFlagThreadMsg('LinkStatusAsResponse ' + ASession.PortId);
+
     ThisReg := '<>';
     ThatReg := '<>';
     ThisPort := 0;
@@ -1206,24 +1706,26 @@ begin
       end;
 
       if ASession <> nil then
-        if fCurrentSessionObjects = nil then
+        if FCurrentSessionObjects = nil then
           ISIndyUtilsException(Self, 'Session Connected =' + ASession.TextID +
             ' but no fCurrentSessionObjects')
         Else
           // ThisSessionIdx := fCurrentSessionObjects.IndexOf(ASession);
             ;
       ThisRegIdx := -1;
-      if FListOfRegConnections <> nil then
+      LRegConLst := ListOfRegConnections.Lock;
+      try
         if LinkToReg <> '' then
-          ThisRegIdx := FListOfRegConnections.IndexOf(LinkToReg);
-      LinkToReg := '<' + LinkToReg + '>';
-      RegObj := nil;
-      if ThisRegIdx < 0 then
-        // do nothing
-      else if FListOfRegConnections.Objects[ThisRegIdx] is TISIndyTCPSvrSession
-      then
-        RegObj := TISIndyTCPSvrSession(FListOfRegConnections.Objects
-          [ThisRegIdx]);
+          ThisRegIdx := LRegConLst.IndexOf(LinkToReg);
+        LinkToReg := '<' + LinkToReg + '>';
+        RegObj := nil;
+        if ThisRegIdx < 0 then
+          // do nothing
+        else if LRegConLst.Objects[ThisRegIdx] is TISIndyTCPSvrSession then
+          RegObj := TISIndyTCPSvrSession(LRegConLst.Objects[ThisRegIdx]);
+      Finally
+        FListOfRegConnections.Unlock
+      end;
 
       ThisPortObj := GetSessionByCallingPort(ThisPort);
       if ThisPortObj <> nil then
@@ -1243,7 +1745,8 @@ begin
           Begin
             Result := cIsLinkedOnServer + 'NI#' + ThisReg; // ThisPortExists
             if ThisPortObj.FCoupledSession <> nil then
-              Result := cIsLinkedOnServer + 'CI#' + ThisReg; // ThisPortCoupled
+              Result := cIsLinkedOnServer + 'CI#' + ThisReg;
+            // ThisPortCoupled
             if ThatPortObj = nil then
               Exit;
             if ThatPortObj.FCoupledSession <> nil then
@@ -1285,19 +1788,27 @@ begin
   Except
     On E: Exception do
     begin
-      ISIndyUtilsException(Self, E, 'LinkStatusAsResponse');
+      ISIndyUtilsException(Self, E, 'Link#StatusAsResponse Result=' + Result);
+      ApplicationFlagThreadMsg('LinkStatusAsResponse');
       Result := cIsLinkedOnServer + 'CE#' + E.Message;
     end;
   end;
 end;
 
-function TIsIndyApplicationServer.ListOfRegConnections: TStringList;
+function TIsIndyApplicationServer.ListOfRegConnections: TIdThreadSafeStringList;
+Var
+  LSList: TStringList;
 begin
   if FListOfRegConnections = nil then
   Begin
-    FListOfRegConnections := TStringList.Create;
-    FListOfRegConnections.Sorted := True;
-    FListOfRegConnections.Duplicates := dupError;
+    FListOfRegConnections := TIdThreadSafeStringList.Create;
+    LSList := FListOfRegConnections.Lock;
+    try
+      LSList.Sorted := True;
+      LSList.Duplicates := dupError;
+    finally
+      FListOfRegConnections.Unlock;
+    end
   end;
   Result := FListOfRegConnections;
 end;
@@ -1341,7 +1852,9 @@ end;
 function TIsIndyApplicationServer.LocalContext(AContext: TIdContext)
   : TIsIndyTCPServerContext;
 begin
-  if AContext is TIsIndyTCPServerContext then
+  if AContext = nil then
+    Result := nil
+  else if AContext is TIsIndyTCPServerContext then
     Result := TIsIndyTCPServerContext(AContext)
   Else
     raise Exception.Create('Error AContext is Not TIsIndyTCPServerContext');
@@ -1352,18 +1865,24 @@ begin
   if FLogList = nil then
     Result := ''
   Else
-    Try
-      While Not FListLock.TryEnter do
-        Sleep(1000);
-      Result := FLogList.Text;
+  Begin
+    If Not ApSrvrListLockTryEnter('ReadLogMessage', 2) Then
+    Begin
+      Inc(FLogsMissed);
+      Exit;
+    end;
 
+    Try
+      Result := FLogList.Text;
       if FLogsMissed > 0 then
         Result := Result + #13#10 + 'Missed msgs=' + IntToStr(FLogsMissed);
       FLogList.Clear;
       FLogsMissed := 0;
     Finally
-      FListLock.Release;
+      ApSrvrListLockRelease('ReadLogMessage');
     End;
+  end;
+
   ConfirmRegisteredConnections;
   If FDoNextCloseEvent < now then
     CloseInactiveSessions;
@@ -1375,6 +1894,8 @@ Var
   RegOb, ConnectObj: TISIndyTCPSvrSession;
   No1, No2: Integer;
   RegNam: AnsiString;
+  LRegConList: TStringList;
+  LConObjLst: TList;
 begin
   RegOb := nil;
   ConnectObj := nil;
@@ -1382,21 +1903,30 @@ begin
   No1 := 0;
   No2 := 0;
   try
-    if fCurrentSessionObjects = nil then
-      Exit; // No Connections
-
-    If (FListOfRegConnections <> nil) and (ARegNo > -1) and
-      (ARegNo < FListOfRegConnections.Count) then
-      if FListOfRegConnections.Objects[ARegNo] is TISIndyTCPSvrSession then
-        RegOb := TISIndyTCPSvrSession(FListOfRegConnections.Objects[ARegNo]);
-
-    if AConnectNo >= fCurrentSessionObjects.Count then
-      AConnectNo := fCurrentSessionObjects.Count - 1;
-    if (AConnectNo > -1) then
-      if TObject(fCurrentSessionObjects[AConnectNo]) is TISIndyTCPSvrSession
-      then
-        ConnectObj := fCurrentSessionObjects[AConnectNo];
-
+    if FCurrentSessionObjects = nil then
+      Exit;
+    // No Connections
+    If (FListOfRegConnections <> nil) then
+    Begin
+      LRegConList := FListOfRegConnections.Lock;
+      Try
+        If (ARegNo > -1) and (ARegNo < LRegConList.Count) then
+          if LRegConList.Objects[ARegNo] is TISIndyTCPSvrSession then
+            RegOb := TISIndyTCPSvrSession(LRegConList.Objects[ARegNo]);
+      Finally
+        FListOfRegConnections.Unlock
+      End;
+    End;
+    LConObjLst := FCurrentSessionObjects.LockList;
+    try
+      if AConnectNo >= LConObjLst.Count then
+        AConnectNo := LConObjLst.Count - 1;
+      if (AConnectNo > -1) then
+        if TObject(LConObjLst[AConnectNo]) is TISIndyTCPSvrSession then
+          ConnectObj := LConObjLst[AConnectNo];
+    finally
+      FCurrentSessionObjects.UnlockList;
+    end;
     if (ConnectObj = nil) and (RegOb <> nil) then
       ConnectObj := RegOb.FCoupledSession as TISIndyTCPSvrSession;
 
@@ -1421,23 +1951,38 @@ Var
   RestartSrvAtTime: TDateTime;
   i: Integer;
   Chnl: TISIndyTCPSvrSession;
+  LListOfReg: TStringList;
 begin
-  ISIndyUtilsException(Self, '#ResetSvr');
+  ISIndyUtilsException(Self, ' #ResetSvr');
   RestartSrvAtTime := now + 3 / 24 / 60; // hold reject reset for one minute;
   if FListOfRegConnections <> nil then
-    for i := 0 to FListOfRegConnections.Count - 1 do
-    Begin
-      if FListOfRegConnections.Objects[i] is TISIndyTCPSvrSession then
-      Begin
-        Chnl := FListOfRegConnections.Objects[i] as TISIndyTCPSvrSession;
-        if Chnl.FCoupledSession <> nil then
-          Chnl.FCoupledSession.CloseGracefully;
-        Chnl.CloseGracefully;
+    if ApSrvrListLockTryEnter('ResetSvr', 5) then
+      Try
+        LListOfReg := FListOfRegConnections.Lock;
+        Try
+          for i := LListOfReg.Count - 1 Downto 0 do
+            Try
+              if LListOfReg.Objects[i] is TISIndyTCPSvrSession then
+              Begin
+                Chnl := LListOfReg.Objects[i] as TISIndyTCPSvrSession;
+                if Chnl.FCoupledSession <> nil then
+                  Chnl.FCoupledSession.CloseIsObjGracefully;
+                Chnl.CloseIsObjGracefully;
+              end;
+            Except
+              On E: Exception do
+                ApplicationFlagThreadMsg('ResetSvr Exception:' + E.Message);
+            end;
+        Finally
+          FListOfRegConnections.Unlock;
+        end;
+      Finally
+        ApSrvrListLockRelease('ResetSvr');
       end;
-    end;
-
   Result := 'Suspending Server until ' + FormatDateTime('dd hh:mm:ss',
     RestartSrvAtTime);
+  ISIndyUtilsException(Self, '#' + Result);
+  ApplicationFlagThreadMsg(Result);
   FResetStartTime := RestartSrvAtTime;
 end;
 
@@ -1455,29 +2000,37 @@ function TIsIndyApplicationServer.ServerDetailsAsText: AnsiString;
 
 Var
   i: Integer;
-  ss: String;
 begin
   Result := '';
-  if Bindings <> nil then
-    for i := 0 to Bindings.Count - 1 do
-      Result := Result + 'Listening on Port ' + GetThisHostIPAddressViaIndy +
-        ':' + IntToStr(Bindings[i].Port) + ' ' +
-        IPVersionStr(Bindings[i].IPVersion) + #13#10;
-  Result := Result + 'Idle Time Permitted =' +
-    FIdleTimePermitted.ToString + #13#10;
-  Result := Result + 'Maximum Calls Per Minute is ' +
-    IntToStr(MaxCallsPerMinute) + #13#10;
-  if fCurrentAddresses <> nil then
-    Result := Result + CurrentAddressDetails + #13#10;
+  Try
+    if Bindings <> nil then
+      for i := 0 to Bindings.Count - 1 do
+        Result := Result + 'Listening on Port ' + GetThisHostIPAddressViaIndy +
+          ':' + IntToStr(Bindings[i].Port) + ' ' +
+          IPVersionStr(Bindings[i].IPVersion) + #13#10;
+    Result := Result + 'Idle Time Permitted =' +
+      FIdleTimePermitted.ToString + #13#10;
+    Result := Result + 'Maximum Calls Per Minute is ' +
+      IntToStr(MaxCallsPerMinute) + #13#10;
+    if FCurrentAddresses <> nil then
+      Result := Result + CurrentAddressDetails + #13#10;
 
-  if Contexts <> nil then
-    Result := Result + 'Current Sessions =' + IntToStr(Contexts.Count) + #13#10;
-  Result := Result + 'Current Server Context Objects =' +
-    IntToStr(GlobalContextCount) + #13#10;
-  Result := Result + 'Current Server TCP Objects =' +
-    IntToStr(FServerTcpSessions) + #13#10;
-  Result := Result + #13#10 + 'Connection Details' + #13#10 +
-    AllConnectionsAsText;
+    if Contexts <> nil then
+      Result := Result + 'Current Sessions =' +
+        IntToStr(Contexts.Count) + #13#10;
+    Result := Result + 'Current Server Context Objects =' +
+      IntToStr(GlobalContextCount) + #13#10;
+    Result := Result + 'Current Server TCP Objects =' +
+      IntToStr(FServerTcpSessions) + #13#10;
+    Result := Result + #13#10 + 'Connection Details' + #13#10 +
+      AllConnectionsAsText;
+  Except
+    On E: Exception do
+    Begin
+      WritelnIfPossible('ServerDetailsAsText Exception ' + E.Message);
+      ISIndyUtilsException(Self, E, '#ServerDetailsAsText')
+    End;
+  end;
 end;
 
 procedure TIsIndyApplicationServer.SetMaxCallsperminute(AValue: Integer);
@@ -1577,60 +2130,123 @@ begin
   inherited; // added to server contexts on beforerun
   if Assigned(GlobalCountOfComsObjectTypes) then
     GlobalCountOfComsObjectTypes.CountComsTypes(Self, True);
+  // While Testing
+  ApplicationFlagThreadMsg('Context Create ' + '(' +
+    IntToStr(LongWord(Pointer(Self))) + ') Count=' +
+    IntToStr(GlobalContextCount));
   Inc(GlobalContextCount);
+  TSingletonObjTimeSpanRecording.RecordObjectOnCreate(Self);
 end;
 
 function TIsIndyTCPServerContext.CtxTextId: string;
 begin
-  if FTcpRef = nil then
-    Result := 'No TcpRef'
+  if FTcpRef <> nil then
+    Result := FTcpRef.PortId
+  else if Connection <> nil then
+    Result := 'No TcpRef '
   else
-    Result := FTcpRef.TextID;
+    Result := 'No Connection';
+
+  Result := FContextID + '>>' + Result;
 end;
 
 destructor TIsIndyTCPServerContext.Destroy;
 Var
   s: String;
 begin
+  { New thinking September 2026
+    Session is Owned by Context }
+  // While Testing
+  ApplicationFlagThreadMsg('Context Closing ' + CtxTextId + ' Count = ' +
+    IntToStr(GlobalContextCount));
   Dec(GlobalContextCount);
-  TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
-    FContextStopWatch.Elapsed);
-  FDestroying := True;
+
+  if Not FSessionClosing then
+    ApplicationFlagThreadMsg('TIsIndyTCPServerContext.Destroy not closing ');
+
+  FSessionClosing := True;
   try
-    if GblLogAllChlOpenClose then
-    begin
-      s := CtxTextId;
-      ISIndyUtilsException(Self, '# Closing Context::' + s);
+    try
+      TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
+        FContextStopWatch.Elapsed);
+      s := ' (' + IntToStr(LongInt(Pointer(Self))) + ') ' + CtxTextId;
+      // while testing
+      // if GblRptRegConnectiononSrvr then
+      ApplicationFlagThreadMsg('Closing Context:: ' + s);
+      if FTcpRef <> nil then
+        if FTcpRef.FServerContext <> nil then
+          if FTcpRef.FServerContext = Self then
+            FreeAndNil(FTcpRef)
+          else if FTcpRef.FServerContext <> nil then
+            ApplicationFlagThreadMsg
+              (s + ' TIsIndyTCPServerContext.Destroy Ref not owned');
+
+      Try
+        FreeAndNil(FTcpRef);
+      Except
+        On E: Exception do
+          ISIndyUtilsException(Self, E, s + '# FreeAndNil(FTcpRef)::' +
+            CtxTextId);
+      end;
+
+      if FTcpRef <> nil then
+        ApplicationFlagThreadMsg(s + ' Closing Context::FTcpRef <> nil ' + s);
+
+      if FOwnsConnection then
+        ApplicationFlagThreadMsg('Closing Context::Owned Connection=nil ' + s)
+      Else
+        ApplicationFlagThreadMsg('Closing Context::FConnection=nil ' + s);
+    finally
+      Try
+        inherited;
+        if FConnection <> nil then
+          ApplicationFlagThreadMsg('inherited Destroy Exit FConnection <> nil')
+        else
+          ApplicationFlagThreadMsg('inherited Destroy End Connection');
+
+        if FTcpRef <> nil then
+          ApplicationFlagThreadMsg
+            ('inherited TIsIndyTCPServerContext Destroy Exit FTcpRef <> nil')
+        else
+          ApplicationFlagThreadMsg
+            ('inherited TIsIndyTCPServerContext Destroy Exit');
+
+      Except
+        On E: Exception do
+        begin
+          ApplicationFlagThreadMsg('inherited Destroy Exception ' + E.Message);
+          ISIndyUtilsException(Self, E, 'inherited Destroy ::' + CtxTextId);
+        end;
+      end;
     end;
-    if FTcpRef <> nil then
-      FTcpRef.DropSrvrReferences;
-    FreeAndNil(FTcpRef);
-  finally
-    inherited;
+    if Assigned(GlobalCountOfComsObjectTypes) then
+      GlobalCountOfComsObjectTypes.CountComsTypes(Self, false);
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'Destroy ::' + CtxTextId);
   end;
-  TSingletonObjTimeSpanRecording.RecordObjectLifeTimeOnDestroy(Self,
-    FContextStopWatch.Elapsed);
-  if Assigned(GlobalCountOfComsObjectTypes) then
-    GlobalCountOfComsObjectTypes.CountComsTypes(Self, false);
 end;
 
 function TIsIndyTCPServerContext.TcpRef: TISIndyTCPSvrSession;
 begin
   Try
     Result := nil;
-    if FDestroying then
+    if FSessionClosing then
       Exit;
 
     if FTcpRef = nil then
     begin
-      FTcpRef := TISIndyTCPSvrSession.Create(Self, FServer, Connection);
+      FTcpRef := TISIndyTCPSvrSession.Create(Self, FServer);
+      // OnBeforeRun:=FTcpRef.BeforeContextRun;
+      // While testing
+      ApplicationFlagThreadMsg('Server Session Open ' + FTcpRef.TextID);
       if GblLogAllChlOpenClose then
       Begin
         ISIndyUtilsException(Self, '#Session Open ' + FTcpRef.TextID);
-        FTcpRef.LogAMessage('Session Open');
+        // FTcpRef.LogAMessage('Session Open');
       End;
-      if (FTcpRef.IOHandler <> Connection.IOHandler) then
-        raise Exception.Create('Error FTcpRef.IOHandler<>Connection.IOHandler');
+      if (FTcpRef.FConnection <> Connection) then
+        raise Exception.Create('Error FTcpRef.FConnection<>Connection');
     end;
     Result := FTcpRef;
   Except
@@ -1645,25 +2261,26 @@ end;
 function TIsIndyTCPServerContext.RawTcpRef: TISIndyTCPSvrSession;
 begin
   Result := nil;
-  if FDestroying then
+  if FSessionClosing then
     Exit;
   if FTcpRef = nil then
     Exit;
   Result := FTcpRef;
 
-  If FTcpRef.TcpConnection = nil then
-    If FTcpRef.FServerConnext = Self then
-    Begin
-      FTcpRef.SetConnection(Connection);
-      If FServer is TIdTcpServer then
-        FTcpRef.FServerObject := TIdTcpServer(FServer);
-      if GblLogAllChlOpenClose then
-        FTcpRef.LogAMessage('Session Open ');
-      if (FTcpRef.IOHandler <> Connection.IOHandler) then
-        raise Exception.Create('Error FTcpRef.FServerConnext <> Self');
-    end
-    Else If FTcpRef.FServerConnext <> nil then
-      raise Exception.Create('Error FTcpRef.IOHandler<>Connection.IOHandler');
+  if FTcpRef <> nil then
+    If FTcpRef.TcpConnection = nil then
+      If FTcpRef.FServerContext = Self then
+      Begin
+        FTcpRef.SetConnection(Connection);
+        If FServer is TIdTcpServer then
+          FTcpRef.FServerObject := TIdTcpServer(FServer);
+        if GblLogAllChlOpenClose then
+          ISIndyUtilsException(FTcpRef, 'Session Open ');
+        if (FTcpRef.FConnection <> Connection) then
+          raise Exception.Create('Error FTcpRef.FServerConnext <> Self');
+      end
+      Else If FTcpRef.FServerContext <> nil then
+        raise Exception.Create('Error FTcpRef.IOHandler<>Connection.IOHandler');
 end;
 
 procedure TIsIndyTCPServerContext.ReleaseOldRef;
@@ -1673,7 +2290,7 @@ begin
     If FTcpRef <> nil then
     begin
       FreeAndNil(FTcpRef);
-      ISIndyUtilsException(Self, '#ReleaseOldRef<>nil');
+      ApplicationFlagThreadMsg('#ReleaseOldRef<>nil');
     end;
   Except
     On E: Exception do
@@ -1682,33 +2299,46 @@ begin
 end;
 
 function TIsIndyTCPServerContext.Run: Boolean;
+// Context.OnRun := Server.DoExecute := IsIdTCPSvrSessionExecute
 {$IFNDEF  SuppressIPMetering}
 Var
   StartTime: TTimeSpan;
   ElapsedTimeDownTime, ElapsedProcessTime: TTimeSpan;
 
 begin
+  if FContextID = '' then
+  Begin
+    FContextID := '(' + IntToStr(LongWord(Pointer(Self))) + ')';
+    FContextID := '[' + FContextID +
+      IntToStr(TThread.CurrentThread.ThreadID) + ']';
+    ApplicationFlagThreadMsg('New Context:' + CtxTextId)
+  End;
   StartTime := FContextStopWatch.Elapsed;
   ElapsedTimeDownTime := StartTime.Subtract(FLastProcessComplete);
 {$ELSE}
 begin
 {$ENDIF}
   Result := inherited Run;
-  if FDestroying then
+  if FSessionClosing then
+  Begin
     Result := false;
-
+    ApplicationFlagThreadMsg('Context Closing >> Destroy >> ' + CtxTextId);
+  End
+  Else
+  Begin
 {$IFNDEF  SuppressIPMetering}
-  ElapsedProcessTime := FContextStopWatch.Elapsed.Subtract(StartTime);
-  if ElapsedProcessTime.Seconds > 50 then
-    ISIndyUtilsException(Self, 'Processing Time =' + FormatFloat('###0.000',
-      ElapsedProcessTime.Seconds) + ' Seconds ' + CtxTextId);
+    ElapsedProcessTime := FContextStopWatch.Elapsed.Subtract(StartTime);
+    if ElapsedProcessTime.Seconds > 50 then
+      ISIndyUtilsException(Self, 'Processing Time =' + FormatFloat('###0.000',
+        ElapsedProcessTime.Seconds) + ' Seconds ' + CtxTextId);
 
-  if ElapsedTimeDownTime.Seconds > 50 then
-    ISIndyUtilsException(Self, 'Process Down Time =' + FormatFloat('###0.000',
-      ElapsedTimeDownTime.Seconds) + ' Seconds ' + CtxTextId);
-  CalAverageProcessTime(ElapsedProcessTime, ElapsedTimeDownTime);
-  FLastProcessComplete := FContextStopWatch.Elapsed;
+    if ElapsedTimeDownTime.Seconds > 50 then
+      ISIndyUtilsException(Self, 'Process Down Time =' + FormatFloat('###0.000',
+        ElapsedTimeDownTime.Seconds) + ' Seconds ' + CtxTextId);
+    CalAverageProcessTime(ElapsedProcessTime, ElapsedTimeDownTime);
+    FLastProcessComplete := FContextStopWatch.Elapsed;
 {$ENDIF}
+  end;
 end;
 
 { TISIndyTCPSvr }
@@ -1724,6 +2354,7 @@ function TISIndyTCPSvrSession.AcceptStart: Boolean;
     CurrentKey: LocalKeyRecord;
     LocalTest: AnsiString;
   begin
+    Result := 1.676669;
     Try
       CurrentKey := ATestRecord;
       LocalTest := cApplicationHandshakeCode;
@@ -1750,7 +2381,7 @@ Var
   SessionKey: TDateTime;
   TrnctType: TTCPTransactionTypes;
   SessionRandomKey, Key, ResponseData, DataToSend: AnsiString;
-  IndexState: AnsiChar;
+  // IndexState: AnsiChar;
   Trans: AnsiString;
 
 begin
@@ -1767,20 +2398,27 @@ begin
     // two iterations of original key
     SessionKey := TestConnectionData(LocalKey, cApplicationHandshakeCode);
     if SessionKey < 2.0 then
-      SessionKey := TestConnectionData(LocalKey, cNoPersonality);
+    Begin
+      if FServerObject = nil then
+        ISIndyUtilsException(Self, 'Accept#Start No Server for ' + TextID)
+      else if TIsIndyApplicationServer(FServerObject).AllowNoPersonality then
+      Begin
+        SessionKey := TestConnectionData(LocalKey, cNoPersonality);
+        if SessionKey > 2.0 then
+          ISIndyUtilsException(Self, 'Accept#Start from No Personality '
+            + TextID);
+      end;
+    End;
     SessionRandomKey := RandomKey;
     if SessionKey < 2.0 then
+    Begin
+      ISIndyUtilsException(Self, 'Accept#Start UA ' + PortId);
       // SendError
-      ResponseData := 'UA' + SessionRandomKey
+      ResponseData := 'UA' + 'Failed Connection Decode using 1.676669';
+      // no SessionRandomKey sent
+    End
     Else
-    begin
-      IndexState := 'F';
-
-      if false then
-        ResponseData := 'E' + IndexState + SessionRandomKey
-      else
-        ResponseData := 'D' + IndexState + SessionRandomKey;
-    end;
+      ResponseData := 'DF' + SessionRandomKey;
 
 {$IFDEF NEXTGEN}
     Encrypt(ResponseData.Length, Pointer(ResponseData), SizeOf(SessionKey),
@@ -1803,6 +2441,33 @@ begin
       ISIndyUtilsException(Self, E, 'Accept#Start ' + TextID)
   End;
 end;
+
+{ procedure TISIndyTCPSvrSession.BeforeContextRun(AContext: TIdContext);
+  Var
+  LServer:TIsIndyApplicationServer;
+  begin
+  if AContext=nil then Exit;
+  if AContext <> FServerContext then
+  raise EExceptionIsComsNotExpected.Create('AContext <> FServerContext');
+  if FServerObject is TIsIndyApplicationServer then
+  LServer:= TIsIndyApplicationServer(FServerObject)
+  else
+  raise EExceptionIsComsNotExpected.Create('FServerObject not TIsIndyApplicationServer');
+
+  LServer.CheckBusyOnConnect(FServerContext);
+
+  if LServer.FResetStartTime < 0.001 then
+  If AcceptStart then
+  Begin
+  if GblLogAllChlOpenClose then
+  ApplicationFlagThreadMsg(TextID + ' Channel Open');
+  end
+  else
+  Begin
+  ApplicationFlagThreadMsg(TextID + ' Failed Connect');
+  FServerContext.FSessionClosing := True;
+  end;
+  end; }
 
 {$IFNDEF  SuppressIPMetering}
 
@@ -1869,25 +2534,57 @@ begin
 end;
 
 procedure TISIndyTCPSvrSession.ClearReferences;
+{ New thinking September 2026
+  Session is Owned by Context }
+Var
+  s: string;
 begin
   try
+    s := 'ClearReferences Thread =' + IntToStr(TThread.CurrentThread.ThreadID);
+    If (FServerContext = nil) and (FConnection = nil) then
+      s := s + ' All Nil >> ';
+
     if FServerObject is TIsIndyApplicationServer then
       TIsIndyApplicationServer(FServerObject).DropSession(Self);
-    if FServerObject <> nil then
-      ISIndyUtilsException(Self, 'Server not deleted in drop session');
-  except
-    On E: Exception do
-      ISIndyUtilsException(Self, E, 'TISIndyTCPSvrSession.ClearReferences 1');
-  end;
 
-  try
-    if FServerConnext <> nil then
-      if FServerConnext.FTcpRef = Self then
+    if FServerObject <> nil then
+      ApplicationFlagThreadMsg('Server not deleted in drop session ' + PortId);
+
+    if FServerContext <> nil then
+    Begin
+      ApplicationFlagThreadMsg('FServerContext not deleted in drop session '
+        + PortId);
+      FServerContext.FSessionClosing := True;
+    End;
+
+    if FServerContext <> nil then
+      if FServerContext.FTcpRef = Self then
       begin
-        FServerConnext.FDestroying := True;
-        // FServerConnext.FTcpRef := nil; Let Context free reference
+        FServerContext.FSessionClosing := True;
+        if FInSessionDestroy then
+          FServerContext.FTcpRef := nil;
       end;
 
+    HandleCoupleSessionDropReferences;
+
+    FServerContext := nil;
+    FConnection := nil;
+    SetConnection(FConnection);
+
+    // while testing
+    ApplicationFlagThreadMsg('ClearReferences ' + PortId);
+    // if GblRptRegConnectiononSrvr then
+    ISIndyUtilsException(Self, s + ' #ClearReferences');
+  except
+    On E: Exception do
+    Begin
+      WritelnIfPossible(s + ' ClearReferences Exception ' + E.Message);
+      ISIndyUtilsException(Self, E, s + ' #ClearReferences');
+      Exit;
+    End;
+  End;
+
+  try
     if FCoupledSession <> nil then
     Begin
       if FOwnsCoupledSession then
@@ -1898,8 +2595,40 @@ begin
     FCoupledSession := nil;
   except
     On E: Exception do
-      ISIndyUtilsException(Self, E, 'TISIndyTCPSvrSession.ClearReferences 2');
+    Begin // s has thread
+      WritelnIfPossible(s + ' ClearReferences 2 Exception ' + E.Message);
+      ISIndyUtilsException(Self, E, s + ' #ClearReferences 2');
+      Exit;
+    End;
   end;
+end;
+
+procedure TISIndyTCPSvrSession.CloseConnection;
+{ New thinking September 2026
+  Session is Owned by Context }
+begin
+  FClosingTcpSocket := True;
+  ApplicationFlagThreadMsg('TISIndyTCPSvrSession.CloseConnection ' + TextID);
+  if FConnection <> nil then
+  Begin
+    ApplicationFlagThreadMsg
+      ('TISIndyTCPSvrSession.CloseConnection FConnection<>nil ' + TextID);
+    if FConnection.Connected then
+      FConnection.Disconnect;
+  End;
+
+  if FServerContext <> nil then
+  Begin
+    ApplicationFlagThreadMsg
+      ('TISIndyTCPSvrSession.CloseConnection FServerContext<>nil ' + TextID);
+    If not FServerContext.FSessionClosing then
+      ApplicationFlagThreadMsg
+        ('TISIndyTCPSvrSession.CloseConnection FServerContext not closing '
+        + TextID);
+  End;
+
+  WasClosedForcfullyOrGracefully;
+  // Will Free as connection run by context
 end;
 
 {$IFNDEF  SuppressIPMetering}
@@ -1961,8 +2690,8 @@ begin
     Result := Result + #13#10' Process ' + FormatFloat('###0.000 mSecs',
       FAveProcTm) + ' Max' + FormatFloat('(0.000)', FmaxProcTm) + ' Min' +
       FormatFloat('(0.000)', FminProcTm);
-  if FServerConnext <> nil then
-    Result := Result + #13#10 + FServerConnext.ContextResponseTimesText;
+  if FServerContext <> nil then
+    Result := Result + #13#10 + FServerContext.ContextResponseTimesText;
 end;
 {$ENDIF}
 
@@ -1979,17 +2708,22 @@ begin
 end;
 
 constructor TISIndyTCPSvrSession.Create(AContext: TIsIndyTCPServerContext;
-  AServer: TIdCustomTCPServer; AConnection: TIdTCPConnection);
+  AServer: TIdCustomTCPServer);
 begin
+  if (AContext = nil) or (AServer = nil) then
+    raise EExceptionIsComsNotExpected.Create('(AContext=nil) or (AServer=nil)');
+  if (AContext.Connection = nil) then
+    raise EExceptionIsComsNotExpected.Create('AContext.Connection=nil');
+
   Inherited Create;
   ReadDataWaitDiv5 := 5000; // ms
   FCountTo80 := 0;
   FNext80TransactionAllowance := StopWatch.Elapsed.Add
     (cStart80TransactionAllowence);
-  FServerConnext := AContext;
+  FServerContext := AContext;
   If AServer is TIdTcpServer then
     FServerObject := TIdTcpServer(AServer);
-  SetConnection(AConnection);
+  SetConnection(AContext.Connection);
   If FServerObject is TIsIndyApplicationServer then
     TIsIndyApplicationServer(FServerObject).AddSession(Self);
   IsTimedOut(false);
@@ -2001,12 +2735,34 @@ end;
 
 destructor TISIndyTCPSvrSession.Destroy;
 begin
-  try
-    ClearReferences;
-    // FreeAndNil(FLockSession);
-  finally
-    inherited;
-  end;
+  FClosingTcpSocket := True;
+  Try
+    FInSessionDestroy := True;
+    FConnection := nil; // Connection Managed by context
+    try
+      if FServerContext <> nil then
+        if FServerContext.FTcpRef = Self then
+        Begin
+          FServerContext.FTcpRef := nil;
+          if FServerContext.FSessionClosing then
+            ApplicationFlagThreadMsg('Context Closing:' + PortId)
+          else
+            ApplicationFlagThreadMsg('Closing Open Context:' + PortId);
+          FServerContext.FSessionClosing := True;
+        End;
+      ClearReferences;
+    finally
+      try
+        inherited;
+      Except
+        On E: Exception do
+          ISIndyUtilsException(Self, E, 'Session Destroy Inherited');
+      End;
+    end;
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'Session Destroy');
+  End;
 end;
 
 Procedure TISIndyTCPSvrSession.DoFileTransferBlockDnLd(ACommand: AnsiString);
@@ -2027,7 +2783,7 @@ begin // BlckSz:Int+BlkStart:int64+^FileName
     if Byte(ACommand[13]) <> Byte(Ord('^')) then
       raise Exception.Create('Corrupted data');
 
-    CMDFileName := Copy(ACommand, 14, Length(ACommand));
+    CMDFileName := copy(ACommand, 14, Length(ACommand));
     TrfFileName := DecodeSafeFileTransferPath(CMDFileName);
 
     if not FileExists(TrfFileName) then
@@ -2045,7 +2801,8 @@ begin // BlckSz:Int+BlkStart:int64+^FileName
     ServerFile := TFileStream.Create(TrfFileName, fmOpenRead or
       fmShareDenyNone);
     try
-      FileSz := ServerFile.Size; // ServerFile.Seek(0,soFromEnd);
+      FileSz := ServerFile.Size;
+      // ServerFile.Seek(0,soFromEnd);
       if BlkStart + BlckSz > FileSz then
         BlckSz := FileSz - BlkStart;
       ServerFile.Seek(BlkStart, soFromBeginning);
@@ -2059,7 +2816,8 @@ begin // BlckSz:Int+BlkStart:int64+^FileName
         FRandomKey{$IFNDEF  SuppressIPMetering}
         , false{$ENDIF});
       If write(DataSend) <> Length(DataSend) then
-        LogAMessage('DoFileTransferBlock : DataSend)<>Length(DataSend');
+        ISIndyUtilsException(Self,
+          'DoFileTransferBlock : DataSend)<>Length(DataSend');
     finally
       ServerFile.Free;
     end;
@@ -2111,7 +2869,7 @@ begin
 {$ENDIF}
     if (ChrDataSt <> nil) and (ChrDataSt[1] <> AnsiChar(0)) then
     begin
-      CMDFileName := Copy(ADataIn, 14, ChrDataSt - ChrDataIn);
+      CMDFileName := copy(ADataIn, 14, ChrDataSt - ChrDataIn);
       Inc(ChrDataSt);
     end;
 
@@ -2190,7 +2948,8 @@ begin
       else
         raise Exception.Create('File Block Bad Write::' + TrfFileName);
       If write(DataSend) <> Length(DataSend) then
-        LogAMessage('DoFileTransferBlock : DataSend)<>Length(DataSend');
+        ISIndyUtilsException(Self,
+          'DoFileTransferBlock : DataSend)<>Length(DataSend');
     finally
       ServerFile.Free;
     end;
@@ -2204,6 +2963,11 @@ function TISIndyTCPSvrSession.DoSimpleRemoteAction(ACommand: AnsiString)
   : AnsiString;
 begin
   Result := '';
+  if (Self = nil) then
+  Begin
+    ApplicationFlagThreadMsg('DoSimpleRemoteAction on Cleared Object');
+    Exit;
+  End;
   if Pos(cRemoteServerDropCoupledSession, ACommand) = 1 then
     Result := DropCoupledSession
   else if Pos(cIsLinkedOnServer, ACommand) = 1 then
@@ -2260,7 +3024,7 @@ begin
   else if Pos(cRemoteForceClose, ACommand) = 1 then
   begin
     Result := 'Boo';
-    CloseGracefully; // test
+    CloseIsObjGracefully; // test
   End
   else if Assigned(FOnSimpleRemoteAction) then
     Result := FOnSimpleRemoteAction(ACommand, Self)
@@ -2300,18 +3064,71 @@ begin
   FCoupledSession := nil;
 end;
 
-procedure TISIndyTCPSvrSession.DropSrvrReferences;
+function TISIndyTCPSvrSession.FullDuplexDispatch(AData,
+  AKey: AnsiString): Boolean;
+// On A server session object FConnection maybe unsafe
+Var
+  SvrContext: TIsIndyTCPServerContext;
+  LConnection: TIdTCPConnection;
 begin
-  try
-    if FServerObject is TIsIndyApplicationServer then
-      TIsIndyApplicationServer(FServerObject).DropSession(Self);
-    FServerObject := nil;
-    FServerConnext := nil;
+  Result := false;
+
+  if FClosingTcpSocket then
+    Exit;
+
+  if Not LockConnectionCon(LConnection) then
+    Exit;
+
+  if FServerContext = nil then
+    Exit;
+  if FServerContext.FTcpRef <> Self then
+    Exit;
+  if FServerContext.FSessionClosing then
+    Exit;
+
+  if FServerContext.Connection <> LConnection then
+    Exit;
+  Try
+    if FServerContext.Connection.Connected then
+      // While Testing
+      // ApplicationFlagThreadMsg('FullDuplexDispatch Connected ' + TextID)
+    else
+      Exit;
   Except
     On E: Exception do
-      ISIndyUtilsException(Self, E, 'DropSrvrReferences');
+    Begin
+      ISIndyUtilsException(Self, E, '#FullDuplexDispatch Not Connected');
+      ApplicationFlagThreadMsg('FullDuplexDispatch Not Connected');
+      Exit;
+    End;
+  End;
+  Try
+    Result := Inherited FullDuplexDispatch(AData, AKey);
+  Except
+    On E: Exception do
+    Begin
+      ISIndyUtilsException(Self, E, 'Inherited #FullDuplexDispatch');
+      ApplicationFlagThreadMsg('Inherited FullDuplexDispatch');
+      Exit;
+    End;
   end;
 end;
+
+// procedure TISIndyTCPSvrSession.DropSrvrReferences;
+// begin
+// try
+// if FServerObject is TIsIndyApplicationServer then
+// TIsIndyApplicationServer(FServerObject).DropSession(Self);
+// FServerObject := nil;
+// FServerContext := nil;
+// Except
+// On E: Exception do
+// begin
+// WritelnIfPossible('Exception in DropSrvrReferences:' + E.Message);
+// ISIndyUtilsException(Self, E, 'DropSrvrReferences');
+// end;
+// end;
+// end;
 
 function TISIndyTCPSvrSession.IsTimedOut(ACloseIfTrue: Boolean): Boolean;
 begin
@@ -2330,9 +3147,9 @@ begin
   if Result and ACloseIfTrue then
   begin
     if GblRptTimeoutClear then
-      ISIndyUtilsException(Self, '# Idle Close ' + PortID + ' Idle Limit =' +
-        FPermittedIdleTime.ToString);
-    CloseGracefully;
+      ApplicationFlagThreadMsg(Self, '# Idle Close ' + PortId + ' Idle Limit ='
+        + FPermittedIdleTime.ToString);
+    CloseIsObjGracefully;
   end;
 end;
 
@@ -2360,26 +3177,14 @@ begin
     else if FCoupledSession.Port = BPort then
       case Result of
         0:
-          Result := 4; // BPort is couple
+          Result := 4;
+        // BPort is couple
         1:
           Result := 5; // reverse match
         2:
           ISIndyUtilsException(Self, 'Session Link Error B Both =' +
             IntToStr(BPort));
       end;
-  end;
-end;
-
-procedure TISIndyTCPSvrSession.LogAMessage(AMessage: String);
-begin
-  try
-    if FServerObject is TIsIndyApplicationServer then
-      TIsIndyApplicationServer(FServerObject).AddLogMessage(TextID, AMessage);
-    if GblLogMsgToGeneralLogl Or (FServerObject = nil) then
-      ISIndyUtilsException(Self, '#' + 'LogAMessage>' + AMessage);
-  Except
-    On E: Exception do
-      ISIndyUtilsException(Self, E, '#' + 'LogAMessage');
   end;
 end;
 
@@ -2511,12 +3316,22 @@ begin
   end;
 end;
 
-function TISIndyTCPSvrSession.PortID: String;
+function TISIndyTCPSvrSession.PortId: String;
 begin
-  if (Length(Address) < 1) Or (Address[1] = '<') then
-    Result := ' Disconnected Was to ' + Address + ':' + IntToStr(Port)
-  else
-    Result := ' Frm ' + Address + ':' + IntToStr(Port);
+  try
+    if (Self = nil) then
+    Begin
+      Result := ' Disconnected Self = nil';
+      ApplicationFlagThreadMsg('PortID on Cleared Object');
+    End
+    Else if (Length(Address) < 1) Or (Address[1] = '<') then
+      Result := ' Disconnected Was to ' + Address + ':' + IntToStr(Port)
+    else
+      Result := Address + ':' + IntToStr(Port);
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'Port Id');
+  end;
 end;
 
 function TISIndyTCPSvrSession.ProcessNextSrvrTransaction: Boolean;
@@ -2525,7 +3340,7 @@ Var
   StartTime: TTimeSpan;
   ElapsedTime: TTimeSpan;
   TimeRec: TTimeRec;
-  StrRtn: String;
+  StrRtn, ss: String;
   TrnctType: TTCPTransactionTypes;
 {$IFDEF Debug}
 begin
@@ -2535,120 +3350,254 @@ begin
 {$ELSE}
 begin
 {$ENDIF}
-  StartTime := FChnlStopWatch.Elapsed;
-  Result := false;
+  Trans := '';
+  Rtn := '';
   Try
-    Rtn := '';
-    Key := '';
-    try
-      if FPermittedIdleTime.Ticks < 1 then
-        IsTimedOut(false); // Get  FPermittedIdleTime
+    if (Self = nil) then
+    Begin
+      ApplicationFlagThreadMsg('ProcessNextSrvrTransaction on Cleared Object');
+      Exit;
+    End;
 
-      Trans := ReadATransactionRecord(TrnctType, Key);
-      ElapsedTime := FChnlStopWatch.Elapsed;
-      ElapsedTime := ElapsedTime.Subtract(StartTime);
-      if ElapsedTime > FReportIdleTime then
-        ISIndyUtilsException(Self, '#Excessive Trans Read Time ' + PortID +
-          #13#10'Elapsed Time =' + ElapsedTime.ToString + #13#10'Key =' + Key);
+    StartTime := FChnlStopWatch.Elapsed;
+    Result := false;
+    Try
+      Rtn := '';
+      Key := '';
+      try
+        if FPermittedIdleTime.Ticks < 1 then
+          IsTimedOut(false);
+        // Get  FPermittedIdleTime
 
-      if (Trans = '') and (Key = '') then
-      Begin
-        Result := Not IsTimedOut(false);
-        if GblRptTimeoutClear and Not Result then
-        Begin
-          ISIndyUtilsException(Self, '#Read Trans = "" ' + PortID +
+        Trans := ReadATransactionRecord(TrnctType, Key);
+        ElapsedTime := FChnlStopWatch.Elapsed;
+        ElapsedTime := ElapsedTime.Subtract(StartTime);
+
+        if ElapsedTime > FReportIdleTime then
+          ISIndyUtilsException(Self, '#Excessive Trans Read Time ' + PortId +
             #13#10'Elapsed Time =' + ElapsedTime.ToString +
             #13#10'Key =' + Key);
-          ISIndyUtilsException(Self, '#Read Timeout ' + PortID);
+
+        if (Trans = '') and (Key = '') then
+        Begin
+          Result := Not IsTimedOut(false);
+          { while Testing }
+          // if Not Result then
+          // ApplicationFlagThreadMsg('Read Trans = "" ' + PortId +
+          // #13#10'Elapsed Time =' + ElapsedTime.ToString +
+          // #13#10'Key =' + Key);
+
+          if GblRptTimeoutClear and Not Result then
+          Begin
+            ISIndyUtilsException(Self, '#Read Trans = "" ' + PortId +
+              #13#10'Elapsed Time =' + ElapsedTime.ToString +
+              #13#10'Key =' + Key);
+            ISIndyUtilsException(Self, '#Read Timeout ' + PortId);
+          End;
+          Exit;
+          // Is Not Timed out keep reading     ???? means????
         End;
-        Exit;
-        // Is Not Timed out keep reading
-      End;
 
-      if FPermittedIdleTime.Ticks > 1 then // Rx Data
-        FTimeOutAt := StartTime.Add(FPermittedIdleTime);
+        if FPermittedIdleTime.Ticks > 1 then // Rx Data
+          FTimeOutAt := StartTime.Add(FPermittedIdleTime);
 
-      CalAveSrvReadTime(ElapsedTime);
+        CalAveSrvReadTime(ElapsedTime);
 {$IFNDEF  SuppressIPMetering}
-      FIsMeteredTransaction := SplitMeteredData(Trans, FCurrentTxMetering);
-      if FIsMeteredTransaction then
-        FCurrentTxMetering := FCurrentTxMetering +
-          AddMeteredTimeRecAsString('PT');
+        FIsMeteredTransaction := SplitMeteredData(Trans, FCurrentTxMetering);
+        if FIsMeteredTransaction then
+          FCurrentTxMetering := FCurrentTxMetering +
+            AddMeteredTimeRecAsString('PT');
 
 {$ENDIF}
-      if (Assigned(FCoupledSession)) and (TrnctType <> SmpAct) then
-      Begin
-        Try
+        if (Assigned(FCoupledSession)) and (TrnctType <> SmpAct) then
+        Begin
+          Try
 {$IFNDEF  SuppressIPMetering}
-          Trans := Trans + FCurrentTxMetering;
+            Trans := Trans + FCurrentTxMetering;
 {$ENDIF}
-          if Not Assigned(FCoupledSession.FCoupledSession) then
-            ISIndyUtilsException(Self,
-              'Full Duplex Coupled session Dispatch no return session '
-              + TextID);
-          Result := FCoupledSession.FullDuplexDispatch(Trans, Key);
+            if Not Assigned(FCoupledSession.FCoupledSession) then
+              ISIndyUtilsException(Self,
+                'Full Duplex Coupled session Dispatch no return session '
+                + TextID);
+            Result := FCoupledSession.FullDuplexDispatch(Trans, Key);
 {$IFNDEF  SuppressIPMetering}
-          ElapsedTime := FChnlStopWatch.Elapsed.Subtract(StartTime);
-          CalAveDispatchTime(ElapsedTime);
+            ElapsedTime := FChnlStopWatch.Elapsed.Subtract(StartTime);
+            CalAveDispatchTime(ElapsedTime);
 {$ENDIF}
-          if Not Result then
-          begin
-            ISIndyUtilsException(Self,
-              'Full Duplex Coupled session Dispatch Fail ' + TextID);
-            if FOwnsCoupledSession then
-              FreeAndNil(FCoupledSession)
-            else
+            if Not Result then
             begin
-              if FCoupledSession <> nil then
-                if FCoupledSession.FCoupledSession = Self then
-                  FCoupledSession.FCoupledSession := nil;
+              Result := True;
+              // But Leave incoming for now because problem was on despatch
+              ss := TextID;
+              if FOwnsCoupledSession then
+                ApplicationFlagThreadMsg
+                  ('Server Session Full Duplex Owned Coupled session Dispatch Fail '
+                  + TextID)
+              else
+                ApplicationFlagThreadMsg
+                  ('Server Session Full Duplex Non Owned Coupled session Dispatch Fail '
+                  + TextID);
+
+              Try
+                if FCoupledSession <> nil then
+                Begin
+                  ss := ss + ' FCoupledSession <> nil but wrong ';
+                  ss := FCoupledSession.TextID + ':Coupled to:' + TextID;
+                end;
+              Except
+                On E: Exception do
+                Begin
+                  ISIndyUtilsException(E, '#Dropping Coupled Session ' + ss);
+                  ApplicationFlagThreadMsg
+                    ('Exception Dropping Coupled Session' + ss);
+                End;
+              end;
+
+              if FOwnsCoupledSession then
+                FreeAndNil(FCoupledSession)
+              else
+              begin
+                Try
+                  if FCoupledSession <> nil then
+                    if FCoupledSession.FCoupledSession = Self then
+                      FCoupledSession.FCoupledSession := nil;
+                  FCoupledSession := nil;
+                Except
+                  On E: Exception do
+                  Begin
+                    ISIndyUtilsException(E, '#Dropping Coupled Session ' + ss);
+                    ApplicationFlagThreadMsg
+                      ('Exception Dropping Coupled Session' + ss);
+                  End;
+                End;
+              end;
               FCoupledSession := nil;
             end;
+          Except
+            on E: Exception do
+            begin
+              FCoupledSession := nil;
+              Rtn := 'Coupled Session Failure ::' + E.Message;
+              Result := false;
+              ISIndyUtilsException(Self, E,
+                '#Coupled Session Dispatch Failure');
+            end;
           end;
-          Result := True; // But Leave incoming for now
-        Except
-          on E: Exception do
-          begin
-            FCoupledSession := nil;
-            Rtn := 'Coupled Session Failure ::' + E.Message;
-            LogAMessage(Rtn);
-            Result := false;
-            ISIndyUtilsException(Self, E, '#Coupled Session Dispatch Failure');
-          end;
-        end;
-      End
-      else
-        case TrnctType of
-          EchoTrans:
-            Begin
-              if TimeRec.FromTransString(Trans) then
-                Trans := Trans + ' Echo MilliSecs:' +
-                  FormatFloat('0.00', TimeRec.DeltaMilliSecs);
+        End
+        else
+          case TrnctType of
+            EchoTrans:
+              Begin
+                if TimeRec.FromTransString(Trans) then
+                  Trans := Trans + ' Echo MilliSecs:' +
+                    FormatFloat('0.00', TimeRec.DeltaMilliSecs);
 {$IFNDEF  SuppressIPMetering}
-              if FIsMeteredTransaction then
-                Trans := Trans + FCurrentTxMetering;
+                if FIsMeteredTransaction then
+                  Trans := Trans + FCurrentTxMetering;
 {$ENDIF}
-              Echo := PackTransaction(Key + Trans,
-                FRandomKey{$IFNDEF  SuppressIPMetering}
-                , false{$ENDIF});
-              // Echo := PackTransaction(Key + '[' + Trans + ']', FRandomKey);
-              Write(Echo);
-              if GblRptMakeConnectionOnSrvr then
-                LogAMessage('Echo Key =' + Key + BytesToLogText(Trans));
-              Result := True;
-            End;
-          SmpAct:
-            Begin
-              Try
-                { if FCoupledSession <> nil then
-                  Begin // Lock returns
-                  Result := True;
-                  // if FLockSession = nil then
-                  // FLockSession := TCriticalSection.Create;
-                  // FLockSession.Enter;
+                Echo := PackTransaction(Key + Trans,
+                  FRandomKey{$IFNDEF  SuppressIPMetering}
+                  , false{$ENDIF});
+                // Echo := PackTransaction(Key + '[' + Trans + ']', FRandomKey);
+                Write(Echo);
+                if GblRptMakeConnectionOnSrvr then
+                  ISIndyUtilsException(Self, 'Echo Key =' + Key +
+                    BytesToLogText(Trans));
+                Result := True;
+              End;
+            SmpAct:
+              Begin
+                Try
+                  { if FCoupledSession <> nil then
+                    Begin // Lock returns
+                    Result := True;
+                    // if FLockSession = nil then
+                    // FLockSession := TCriticalSection.Create;
+                    // FLockSession.Enter;
+                    End;
+                  }
+                  Rtn := DoSimpleRemoteAction(Trans);
+                  if Rtn <> '' then
+                  Begin
+{$IFNDEF  SuppressIPMetering}
+                    if FIsMeteredTransaction then
+                      Rtn := Rtn + FCurrentTxMetering;
+{$ENDIF}
+                    RawRtn := PackTransaction(Key + Rtn,
+                      FRandomKey{$IFNDEF  SuppressIPMetering}
+                      , false{$ENDIF});
+                    Write(RawRtn);
+                    if GblLogMsgToGeneralLogl then
+                      ISIndyUtilsException(Self, 'DoSimpleRemoteAction' +
+                        BytesToLogText(Trans) + #13#10'Rtn' +
+                        BytesToLogText(Rtn));
+                    Result := True;
+                  End
+                  Else
+                  Begin
+                    ISIndyUtilsException(Self,
+                      '#ProcessNextSrvrTransaction - No Response frm Trans' +
+                      BytesToLogText(Trans));
+                    Result := True;
                   End;
-                }
-                Rtn := DoSimpleRemoteAction(Trans);
+
+                Except
+                  On E: Exception do
+                    ISIndyUtilsException(Self, E,
+                      'SmpAct Transaction #ProcessNextSrvrTransaction' +
+                      BytesToLogText(Trans));
+                  // Finally
+                  // if FLockSession <> nil then
+                  // FLockSession.Release;
+                End;
+              End;
+            RdFileTrfBlk:
+              Begin
+                DoFileTransferBlockDnLd(Trans);
+                Result := True;
+              End;
+            PtFileTrfBlk:
+              Begin
+                DoFileTransferBlockUpLd(Trans);
+                Result := True;
+              End;
+            MvString:
+              Begin
+                if Assigned(FOnStringAction) then
+                Begin
+                  StrRtn := FOnStringAction(RecoverTrnsString(Trans), Self);
+{$IFNDEF  SuppressIPMetering}
+                  if FIsMeteredTransaction then
+                    StrRtn := StrRtn + FCurrentTxMetering;
+{$ENDIF}
+                  RawRtn := PackString(StrRtn,
+                    FRandomKey{$IFNDEF  SuppressIPMetering}
+                    , false{$ENDIF});
+                End
+                Else
+                Begin
+                  Key := cReturnError;
+                  Rtn := 'No OnStringAction Function';
+{$IFNDEF  SuppressIPMetering}
+                  if FIsMeteredTransaction then
+                    StrRtn := StrRtn + FCurrentTxMetering;
+{$ENDIF}
+                  RawRtn := PackTransaction(Key + Rtn,
+                    FRandomKey{$IFNDEF  SuppressIPMetering}
+                    , false{$ENDIF});
+                End;
+                Write(RawRtn);
+                Result := True;
+              End;
+            MvRawStrm:
+              Begin
+                if Assigned(FOnAnsiStringAction) then
+                  Rtn := FOnAnsiStringAction(Trans, Self)
+                Else
+                Begin
+                  Key := cReturnError;
+                  Rtn := 'No OnAnsiStringAction Function';
+                End;
                 if Rtn <> '' then
                 Begin
 {$IFNDEF  SuppressIPMetering}
@@ -2659,97 +3608,51 @@ begin
                     FRandomKey{$IFNDEF  SuppressIPMetering}
                     , false{$ENDIF});
                   Write(RawRtn);
-                  if GblLogMsgToGeneralLogl then
-                    ISIndyUtilsException(Self, 'DoSimpleRemoteAction' +
-                      BytesToLogText(Trans) + #13#10'Rtn' +
-                      BytesToLogText(Rtn));
-                  Result := True;
-                End
-                Else
+                End;
+                Result := True;
+              End;
+            FullDuplexMode:
+              Begin
+                Result := DoFullDuplexIncomingAction(Trans);
+                If Not Result then
                 Begin
-                  ISIndyUtilsException(Self,
-                    '#ProcessNextSrvrTransaction - No Response frm Trans' +
-                    BytesToLogText(Trans));
+                  Key := cReturnError;
+                  Rtn := 'No OnFullDuplexIncomingAction Function';
+{$IFNDEF  SuppressIPMetering}
+                  if FIsMeteredTransaction then
+                    Rtn := Rtn + FCurrentTxMetering;
+{$ENDIF}
+                  RawRtn := PackTransaction(Key + Rtn,
+                    FRandomKey{$IFNDEF  SuppressIPMetering}
+                    , false{$ENDIF});
+                  Write(RawRtn);
                   Result := True;
                 End;
-
-              Except
-                On E: Exception do
-                  ISIndyUtilsException(Self, E,
-                    'SmpAct Transaction #ProcessNextSrvrTransaction' +
-                    BytesToLogText(Trans));
-                // Finally
-                // if FLockSession <> nil then
-                // FLockSession.Release;
               End;
-            End;
-          RdFileTrfBlk:
-            Begin
-              DoFileTransferBlockDnLd(Trans);
-              Result := True;
-            End;
-          PtFileTrfBlk:
-            Begin
-              DoFileTransferBlockUpLd(Trans);
-              Result := True;
-            End;
-          MvString:
-            Begin
-              if Assigned(FOnStringAction) then
+            FlgNull:
               Begin
-                StrRtn := FOnStringAction(RecoverTrnsString(Trans), Self);
-{$IFNDEF  SuppressIPMetering}
-                if FIsMeteredTransaction then
-                  StrRtn := StrRtn + FCurrentTxMetering;
-{$ENDIF}
-                RawRtn := PackString(StrRtn,
-                  FRandomKey{$IFNDEF  SuppressIPMetering}
-                  , false{$ENDIF});
-              End
-              Else
-              Begin
-                Key := cReturnError;
-                Rtn := 'No OnStringAction Function';
-{$IFNDEF  SuppressIPMetering}
-                if FIsMeteredTransaction then
-                  StrRtn := StrRtn + FCurrentTxMetering;
-{$ENDIF}
-                RawRtn := PackTransaction(Key + Rtn,
-                  FRandomKey{$IFNDEF  SuppressIPMetering}
-                  , false{$ENDIF});
+                if Assigned(FCoupledSession) then
+                  FCoupledSession.FullDuplexDispatch('', Key) // Forward Null
+                Else
+                begin
+                  RawRtn := PackTransaction(Key,
+                    FRandomKey{$IFNDEF  SuppressIPMetering}
+                    , false{$ENDIF});
+                  Write(RawRtn);
+                end;
+                Result := True;
               End;
-              Write(RawRtn);
-              Result := True;
-            End;
-          MvRawStrm:
-            Begin
-              if Assigned(FOnAnsiStringAction) then
-                Rtn := FOnAnsiStringAction(Trans, Self)
-              Else
+            NewCon:
               Begin
-                Key := cReturnError;
-                Rtn := 'No OnAnsiStringAction Function';
-              End;
-              if Rtn <> '' then
+                ISIndyUtilsException(Self,
+                  ' #ProcessNextSrvrTransaction NewConnection Data' +
+                  BytesToLogText(Trans));
+                Result := false;
+              end;
+            LogServerData:
               Begin
-{$IFNDEF  SuppressIPMetering}
-                if FIsMeteredTransaction then
-                  Rtn := Rtn + FCurrentTxMetering;
-{$ENDIF}
-                RawRtn := PackTransaction(Key + Rtn,
-                  FRandomKey{$IFNDEF  SuppressIPMetering}
-                  , false{$ENDIF});
-                Write(RawRtn);
-              End;
-              Result := True;
-            End;
-          FullDuplexMode:
-            Begin
-              Result := DoFullDuplexIncomingAction(Trans);
-              If Not Result then
-              Begin
-                Key := cReturnError;
-                Rtn := 'No OnFullDuplexIncomingAction Function';
+                ISIndyUtilsException(Self, Trans);
+                Rtn := 'Logged ' + IntToStr(Length(Trans)) + ' Chars';
 {$IFNDEF  SuppressIPMetering}
                 if FIsMeteredTransaction then
                   Rtn := Rtn + FCurrentTxMetering;
@@ -2759,113 +3662,87 @@ begin
                   , false{$ENDIF});
                 Write(RawRtn);
                 Result := True;
-              End;
-            End;
-          FlgNull:
-            Begin
-              if Assigned(FCoupledSession) then
-                FCoupledSession.FullDuplexDispatch('', Key) // Forward Null
-              Else
-              begin
-                RawRtn := PackTransaction(Key,
-                  FRandomKey{$IFNDEF  SuppressIPMetering}
-                  , false{$ENDIF});
-                Write(RawRtn);
               end;
-              Result := True;
-            End;
-          NewCon:
+            FlgError:
+              Begin
+                ISIndyUtilsException(Self,
+                  PortId + ' # ProcessNextSrvrTransaction Flag Error' +
+                  BytesToLogText(Trans));
+                Result := True;
+              End;
+            FlgEmpty:
+              Begin
+                ISIndyUtilsException(Self,
+                  PortId + ' # ProcessNextSrvrTransaction Flag Empty' +
+                  BytesToLogText(Trans));
+                Result := True;
+              End
+          Else
             Begin
-              ISIndyUtilsException(Self,
-                ' #ProcessNextSrvrTransaction NewConnection Data' +
-                BytesToLogText(Trans));
+              If Trans <> '' then
+                ISIndyUtilsException(Self,
+                  PortId + ' # ProcessNextSrvrTransaction Unknown Data' +
+                  BytesToLogText(Trans));
+              // Key := cReturnError;
               Result := false;
-            end;
-          LogServerData:
-            Begin
-              LogAMessage(Trans);
-              Rtn := 'Logged ' + IntToStr(Length(Trans)) + ' Chars';
-{$IFNDEF  SuppressIPMetering}
-              if FIsMeteredTransaction then
-                Rtn := Rtn + FCurrentTxMetering;
-{$ENDIF}
-              RawRtn := PackTransaction(Key + Rtn,
-                FRandomKey{$IFNDEF  SuppressIPMetering}
-                , false{$ENDIF});
-              Write(RawRtn);
-              Result := True;
-            end;
-          FlgError:
-            Begin
-              ISIndyUtilsException(Self,
-                PortID + ' # ProcessNextSrvrTransaction Flag Error' +
-                BytesToLogText(Trans));
-              Result := True;
             End;
-          FlgEmpty:
-            Begin
-              ISIndyUtilsException(Self,
-                PortID + ' # ProcessNextSrvrTransaction Flag Empty' +
-                BytesToLogText(Trans));
-              Result := True;
-            End
-        Else
-          Begin
-            If Trans <> '' then
-              ISIndyUtilsException(Self,
-                PortID + ' # ProcessNextSrvrTransaction Unknown Data' +
-                BytesToLogText(Trans));
-            // Key := cReturnError;
-            Result := false;
-          End;
-        end;
+          end;
 
-      if Not Result then
-      Begin
-        ISIndyUtilsException(Self, '# ProcessNextSrvrTransaction Not Result ' +
-          PortID + #13#10'Trans =' + BytesToLogText(Trans) + #13#10'Key=' + Key
-          + ' Rtn =' + BytesToLogText(Rtn));
-        If Key = '' then
-          Key := cReturnError;
-        If Rtn <> '' then
+        if Not Result then
         Begin
-          RawRtn := PackTransaction
-            (Key + 'ProcessNextSrvrTransaction Rtn False ' + Rtn,
-            FRandomKey{$IFNDEF  SuppressIPMetering}
-            , false{$ENDIF});
-          Write(RawRtn);
-          ISIndyUtilsException(Self, '#Not Result Key=' + Key +
-            ' Closing:ProcessNextSrvrTransaction Rtn False');
+          ISIndyUtilsException(Self, '# ProcessNextSrvrTransaction Not Result '
+            + PortId + #13#10'Trans =' + BytesToLogText(Trans) + #13#10'Key=' +
+            Key + ' Rtn =' + BytesToLogText(Rtn));
+          If Key = '' then
+            Key := cReturnError;
+          If Rtn <> '' then
+          Begin
+            RawRtn := PackTransaction
+              (Key + 'ProcessNextSrvrTransaction Rtn False ' + Rtn,
+              FRandomKey{$IFNDEF  SuppressIPMetering}
+              , false{$ENDIF});
+            Write(RawRtn);
+            ISIndyUtilsException(Self, '#Not Result Key=' + Key +
+              ' Closing:ProcessNextSrvrTransaction Rtn False');
+          end;
+          Result := false;
+          // will CloseGracefully
         end;
-        Result := false; // will CloseGracefully
-      end;
 {$IFNDEF  SuppressIPMetering}
-      ElapsedTime := FChnlStopWatch.Elapsed.Subtract(StartTime);
-      CalAveTransProcTime(ElapsedTime);
+        ElapsedTime := FChnlStopWatch.Elapsed.Subtract(StartTime);
+        CalAveTransProcTime(ElapsedTime);
 {$ENDIF}
-    Except
-      On ee: Exception do
-      begin
-        Result := false;
-        RawRtn := Key + 'Exception::' + ee.Message;
-        ISIndyUtilsException(Self, ee, 'Key=' + Key + ':: Trans =' +
-          BytesToLogText(Trans));
+      Except
+        On ee: Exception do
+        begin
+          Result := false;
+          RawRtn := Key + 'Exception::' + ee.Message;
+          ISIndyUtilsException(Self, ee, 'Key=' + Key + ' :: Trans =' +
+            BytesToLogText(Trans));
+        end;
       end;
-    end;
-  Finally
-    if Not Result then
-      if GblLogAllChlOpenClose then
+    Finally
+      if Not Result then
+        // While Testing
+        // if GblLogAllChlOpenClose then
         ISIndyUtilsException(Self, 'ProcessNextSrvrTransaction #False Result ' +
-          PortID + #13#10 + 'Key =' + Key + ':: Trans =' +
+          PortId + #13#10 + 'Key =' + Key + ':: Trans =' +
           BytesToLogText(Trans));
+    End;
+  Except
+    On E: Exception do
+    begin
+      ISIndyUtilsException(Self, E, 'ProcessNextSrvrTransaction outerloop');
+      ApplicationFlagThreadMsg('ProcessNextSrvrTransaction Exception');
+      Result := false;
+    end;
   End;
 end;
 
 function TISIndyTCPSvrSession.ResetServer(AConnectData: AnsiString): AnsiString;
 begin
   Result := '';
-  ISIndyUtilsException(Self, TextID + '#ResetServer');
-  LogAMessage('Reset Server Command');
+  ISIndyUtilsException(Self, TextID + ' #ResetServer');
   if FServerObject is TIsIndyApplicationServer then
     Result := TIsIndyApplicationServer(FServerObject).ResetSvr(AConnectData)
   else
@@ -2914,13 +3791,15 @@ begin
     Svr := FServerObject as TIsIndyApplicationServer
   else
     Exit;
-
-  if GblRptSrvrRelayConnectionAttempts then
-    ISIndyUtilsException(Self, PortID + 'Set Svr Con ' + AConnectData);
+  // While Testing
+  ApplicationFlagThreadMsg(PortId + ' Set Svr Con ' + AConnectData);
+  // if GblRptSrvrRelayConnectionAttempts then
+  ISIndyUtilsException(Self, PortId + ' #Set Svr Con ' + AConnectData);
 
   if FCoupledSession <> nil then
     DropCoupledSession;
   Tst := Length(cRemoteSetServerRelay) + 1;
+
   Result := '';
   if Pos(cRemoteSetServerRelay, AConnectData) <> 1 then
     Exit;
@@ -2930,14 +3809,15 @@ begin
   if Inx = Tst then
   Begin
     // RemoteServerRelay#SV#Reference From RemoteServerDetails#
-    Address := Copy(AConnectData, Tst + 3, 255);
+    Address := copy(AConnectData, Tst + 3, 255);
     ConToLinkTo := Svr.GetRegConnectionFor(Address);
-    if GblRptSrvrRelayConnectionAttempts then
-      if ConToLinkTo = nil then
-        ISIndyUtilsException(Self, PortID + 'Failed Svr Con ' + AConnectData)
-      Else
-        ISIndyUtilsException(Self, 'Set Svr Con ' + AConnectData + #13#10 +
-          TextID + ' Connected to ' + ConToLinkTo.PortID);
+    // While Testing
+    // if GblRptSrvrRelayConnectionAttempts then
+    if ConToLinkTo = nil then
+      ISIndyUtilsException(Self, PortId + 'Failed Svr Con ' + AConnectData)
+    Else
+      ISIndyUtilsException(Self, 'Set Svr Con ' + AConnectData + #13#10 + TextID
+        + ' Connected to ' + ConToLinkTo.PortId);
   End
   Else
   Begin
@@ -2945,11 +3825,11 @@ begin
     if Inx = Tst then
       try
         // RemoteServerRelay#IP#Host Address or IP:Port
-        Address := Copy(AConnectData, Tst + 3, 255);
+        Address := copy(AConnectData, Tst + 3, 255);
         Inx := Pos(AnsiString(':'), Address);
         if Inx > 6 then
         Begin
-          PortStr := Copy(Address, Inx + 1, 255);
+          PortStr := copy(Address, Inx + 1, 255);
 {$IFDEF NextGen}
           Address.Length := Inx - 1;
 {$ELSE}
@@ -2968,14 +3848,10 @@ begin
                 AConnectData)
             Else
               ISIndyUtilsException(Self, 'Set Svr Relay ' + AConnectData +
-                #13#10 + PortID + ' Connected to ' + ConToLinkTo.PortID);
+                #13#10 + PortId + ' Connected to ' + ConToLinkTo.PortId);
 
           if (ConToLinkTo <> nil) and (Svr <> nil) then
-          begin
             Inc(Svr.FServerTcpSessions);
-            TISIndyTCPFullDuplexClient(ConToLinkTo).OnLogMsg :=
-              Svr.AddLogMessage;
-          end;
           WillOwn := True;
         End;
       except
@@ -3002,7 +3878,7 @@ begin
   End;
 
   if FCoupledSession <> nil then
-    Result := FCoupledSession.PortID + ' >< ' + PortID
+    Result := FCoupledSession.PortId + ' >< ' + PortId
   else
     Result := 'Fail::' + AConnectData;
 end;
@@ -3021,12 +3897,29 @@ begin
       Svr := FServerObject as TIsIndyApplicationServer
     else
       Exit;
-    NewReg := Copy(ARegData, Length(cRemoteServerConnections) + 1, 255);
+    NewReg := copy(ARegData, Length(cRemoteServerConnections) + 1, 255);
     if IsEmptyString(NewReg) then
+      // do nothing
     Else if NewReg <> FRegisteredAs then
     Begin
       if Not IsEmptyString(FRegisteredAs) then
-        Svr.DropRegConnection(Self);
+      begin
+        // while testing
+        ApplicationFlagThreadMsg('NewReg ' + NewReg + '<> FRegisteredAs ' +
+          FRegisteredAs);
+        ISIndyUtilsException(Self, '#NewReg ' + NewReg + '<> FRegisteredAs ' +
+          FRegisteredAs);
+        //
+        if Not IsEmptyString(FRegisteredAs) then
+          Svr.DropRegConnection(Self);
+      end
+      Else
+      begin
+        // while testing
+        ApplicationFlagThreadMsg('NewReg ' + NewReg);
+        ISIndyUtilsException(Self, '#NewReg ' + NewReg);
+        //
+      end;
       FRegisteredAs := NewReg;
     End;
     Result := Svr.AllRegisteredConnections(Self);
@@ -3043,32 +3936,36 @@ function TISIndyTCPSvrSession.ShowServerDetails: AnsiString;
 Var
   no: AnsiString;
 begin
-  if not(FServerObject is TIsIndyApplicationServer) then
-    Result := ''
-  Else
-  Begin
-    Result := TIsIndyApplicationServer(FServerObject).ServerDetailsAsText;
+  Try
+    if not(FServerObject is TIsIndyApplicationServer) then
+      Result := ''
+    Else
+    Begin
+      Result := TIsIndyApplicationServer(FServerObject).ServerDetailsAsText;
+    End;
+    Result := Result + #13#10'This Session is ' + PortId + #13#10;
+    if Assigned(FOnSimpleRemoteAction) then
+      no := ''
+    Else
+      no := 'No ';
+    Result := Result + no + 'On Simple RemoteAction Assigned' + #13#10;
+    if Assigned(FOnStringAction) then
+      no := ''
+    Else
+      no := 'No ';
+    Result := Result + no + 'On String Action Assigned' + #13#10;
+    if Assigned(FOnAnsiStringAction) then
+      no := ''
+    Else
+      no := 'No ';
+    Result := Result + no + 'On Ansi String Action Assigned' + #13#10;
+
+    Result := Result + #13#10 + 'State of Connections' +
+      TGblRptComs.ReportObjectTypes;
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'TGblRptComs.ReportObjectTypes');
   End;
-  Result := Result + #13#10'This Session is ' + PortID + #13#10;
-  if Assigned(FOnSimpleRemoteAction) then
-    no := ''
-  Else
-    no := 'No ';
-  Result := Result + no + 'On Simple RemoteAction Assigned' + #13#10;
-  if Assigned(FOnStringAction) then
-    no := ''
-  Else
-    no := 'No ';
-  Result := Result + no + 'On String Action Assigned' + #13#10;
-  if Assigned(FOnAnsiStringAction) then
-    no := ''
-  Else
-    no := 'No ';
-  Result := Result + no + 'On Ansi String Action Assigned' + #13#10;
-
-  Result := Result + #13#10 + 'State of Connections' +
-    TGblRptComs.ReportObjectTypes;
-
 end;
 
 function TISIndyTCPSvrSession.TextID: String;
@@ -3082,14 +3979,24 @@ begin
 end;
 
 procedure TISIndyTCPSvrSession.WasClosedForcfullyOrGracefully;
+{ New thinking September 2026
+  Session is Owned by Context }
 begin
   Try
-    inherited;
-    // Port := 0;
+    if GblLogAllChlOpenClose then
+      ApplicationFlagThreadMsg(Self,
+        'TISIndyTCPSvrSession.WasClosedForcfullyOrGracefully ' + TextID);
     ClearReferences; // Session is closed must remove references
+    if not FInSessionDestroy then
+      inherited;
   Except
     On E: Exception do
+    begin
+      ApplicationFlagThreadMsg
+        ('TISIndyTCPSvrSession.WasClosedForcfullyOrGracefully Exception ' +
+        E.Message);
       ISIndyUtilsException(Self, E, '# WasClosedForcfullyOrGracefully');
+    end;
   End;
 end;
 
@@ -3112,6 +4019,7 @@ begin
     // FCountTo80 := 0;
     if GblLogAllChlOpenClose then
       ISIndyUtilsException(Self, 'NewBusyObject ' + TextData);
+    TSingletonObjTimeSpanRecording.RecordObjectOnCreate(Self);
   Except
     On E: Exception do
       ISIndyUtilsException(Self, E, 'NewBusyObject ' + TextData);
@@ -3177,6 +4085,7 @@ begin
           ISIndyUtilsException(Self, FIpStr + ':# Waiting');
       end;
     end;
+    TM := FBusyWatch.Elapsed;
     FAllowTo80 := TM.Add(AAllowance);
   end;
   FLastCall := TM;
@@ -3208,28 +4117,39 @@ procedure TIsMonitorTCPAppServer.TTstThrd.Execute;
 Var
   FTst: TISIndyTCPClient;
   Rslt: String;
+  Minutes: Integer;
 begin
+  Minutes := 0;
+  FTst := nil;
   While not Terminated do
     Try
       Try
+        FreeAndNil(FTst);
         FTst := TISIndyTCPClient.StartAccess(FIpAddress, FPort);
-        if FTst.Active then
-        Begin
-          FLastStatus := now;
-          Rslt := FTst.ServerDetails;
-          if Pos('Port ' + IntToStr(FPort), Rslt) < 7 then
-            raise Exception.Create('Bad Details Returned');
-          if FLogged then
-            ISIndyUtilsException(Self, '# Return Success Ip=' + FIpAddress + ':'
+        if FTst <> nil then
+          if FTst.Active then
+          Begin
+            FLastStatus := now;
+            Rslt := FTst.ServerDetails;
+            if Pos(':' + IntToStr(FPort), Rslt) < 7 then
+              raise Exception.Create('Bad Details Returned');
+            if FLogged then
+              ApplicationFlagThreadMsg(Self, ' Return Success Ip=' + FIpAddress
+                + ':' + IntToStr(FPort));
+            FLogged := false;
+          End
+          Else If not FLogged then
+          begin
+            ApplicationFlagThreadMsg(Self, ' Failed Test Ip=' + FIpAddress + ':'
               + IntToStr(FPort));
-          FLogged := false;
-        End
-        Else If not FLogged then
-        begin
-          ISIndyUtilsException(Self, '# Failed Test Ip=' + FIpAddress + ':' +
-            IntToStr(FPort));
-          FLogged := True;
-        end;
+            FLogged := True;
+          end;
+        if (Minutes mod 15) = 0 then
+        Begin
+          ISIndyUtilsException(Self, ' Test Period = ' + IntToStr(Minutes) +
+            ' Minutes Time Now ' + FormatDateTime('dd mmm hh:nn:ss', now));
+        End;
+        Inc(Minutes);
         Sleep(60000);
       Finally
         FreeAndNil(FTst);
@@ -3239,7 +4159,7 @@ begin
       Begin
         FTst := nil;
         if Not FLogged then
-          ISIndyUtilsException(Self, E, 'Execute');
+          ISIndyUtilsException(Self, E, '#Execute');
         FLogged := True;
       End;
     End;
@@ -3259,6 +4179,8 @@ begin
   FTestThread := TTstThrd.Create(AIpAddress, APort);
   ISIndyUtilsException(Self, '#Testing TCP Server on ' + AIpAddress + ':' +
     IntToStr(APort));
+  Sleep(100);
+  FTestThread.Resume;
 end;
 
 destructor TIsMonitorTCPAppServer.Destroy;
@@ -3295,9 +4217,16 @@ end;
 
 destructor TServerCleanup.Destroy;
 begin
+  ApplicationFlagThreadMsg('Destroy Cleanup Object');
+  if FOwner is TIsIndyApplicationServer then
+    TIsIndyApplicationServer(FOwner).FCleanupThread := nil;
+  FOwner := nil;
+
   if Assigned(GlobalCountOfComsObjectTypes) then
     GlobalCountOfComsObjectTypes.CountComsTypes(Self, false);
+  ApplicationFlagThreadMsg('Destroy Cleanup Before inherited Object');
   inherited;
+  ApplicationFlagThreadMsg('Destroy Cleanup After inherited Object');
 end;
 
 procedure TServerCleanup.Execute;
@@ -3309,33 +4238,78 @@ begin
     Srv := TIsIndyApplicationServer(FOwner)
   Else
     Exit;
+
+  SecondCount := 0;
+  LogCount := 0;
+
   while Not Terminated do
     Try
-      if Terminated then
-        Exit;
       Dec(SecondCount);
-      if SecondCount < 1 then
+
+      if FOwner = nil then
+        Terminate
+      else if SecondCount < 1 then
       Begin
-        Srv.ConfirmRegisteredConnections;
-        If Srv.FDoNextCloseEvent < now then
+        ApplicationFlagThreadMsg('Start Cleanup');
+
+        if FOwner = Srv then
+{$IFDEF FPC}
+          // Srv.ConfirmRegisteredConnections
+          ApplicationFlagThreadMsg(Self, 'Cleanup Disabled')
+{$ELSE}
+{$IFDEF DoApplicationObjectCleanup}
+          Srv.ConfirmRegisteredConnections
+{$ELSE}
+          ApplicationFlagThreadMsg(Self, 'Cleanup Disabled')
+{$ENDIF}
+{$ENDIF}
+        Else
+          Terminate;
+
+        ApplicationFlagThreadMsg('Cleanup Done ConfirmRegisteredConnections');
+        if FOwner = nil then
+          Terminate;
+
+        if Terminated then
+        Begin
+          ApplicationFlagThreadMsg('Cleanup Terminated 1');
+          Exit;
+        End;
+
+        If (FOwner = Srv) and (Srv.FDoNextCloseEvent < now) then
+        Begin
+{$IFDEF DoApplicationObjectCleanup}
           Srv.CloseInactiveSessions;
+{$ELSE}
+          ApplicationFlagThreadMsg(Self, 'Cleanup Disabled');
+{$ENDIF}
+          ApplicationFlagThreadMsg('Cleanup Done CloseInactiveSessions');
+        end;
         SecondCount := 30; // 30 seconds
         Dec(LogCount);
         if LogCount < 1 then
         Begin
-          ISIndyUtilsException('','');
+          ISIndyUtilsException('', '');
           ISIndyUtilsException(Self, '#TimeStamp'#13#10 +
-            FormatDateTime(' dd mmm hh:nn:ss', now)+Crlf);
-          LogCount := 60; // every half hour
+            FormatDateTime(' dd mmm hh:nn:ss', now) + crlf);
+          LogCount := 60;
+          // every half hour
         End;
+        ApplicationFlagThreadMsg('End Cleanup');
       End;
-      if Terminated then
-        Exit;
-      Sleep(1000);
+      if not Terminated then
+        Sleep(1000)
+      else
+        ApplicationFlagThreadMsg('Cleanup Terminated Final');
     Except
       On E: Exception do
-        ISIndyUtilsException(Self, E, 'Execute');
+      begin
+        WritelnIfPossible('Cleanup Execute Exception>>' + E.Message);
+        ISIndyUtilsException(Self, E, '#Execute');
+        Terminate;
+      end;
     End;
+  ApplicationFlagThreadMsg('Cleanup Terminated OuterLoop');
 end;
 
 end.

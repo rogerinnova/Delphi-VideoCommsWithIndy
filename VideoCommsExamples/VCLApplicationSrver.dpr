@@ -1,16 +1,15 @@
 program VCLApplicationSrver;
 
 uses
-{$IFDEF TestFastMM}
+  {$IFDEF TestFastMM}
   FastMM5 in 'Z:\ThirdPartyGitRepo\FastMM\FastMM5-master\FastMM5.pas',
   ISFastMMInit in '..\IsLibrayExtracts\ISFastMMInit.pas',
-{$ENDIF }
+  {$ENDIF }
   Vcl.Forms,
-  FmVCLApplicationSrver in 'FmVCLApplicationSrver.pas' {ServerForm} ,
+  FmVCLApplicationSrver in 'FmVCLApplicationSrver.pas' {ServerForm},
   IsIndyTCPApplicationServer in '..\LibraryCode\IsIndyTCPApplicationServer.pas',
   IsIndyUtils in '..\IsLibrayExtracts\IsIndyUtils.pas',
-  IsObjectTimeSpanRecording
-    in '..\IsLibrayExtracts\IsObjectTimeSpanRecording.pas';
+  IsObjectTimeSpanRecording in '..\IsLibrayExtracts\IsObjectTimeSpanRecording.pas' {$R *.res};
 
 {$R *.res}
 
@@ -26,5 +25,4 @@ begin
   Application.MainFormOnTaskbar := True;
   Application.CreateForm(TServerForm, ServerForm);
   Application.Run;
-
 end.

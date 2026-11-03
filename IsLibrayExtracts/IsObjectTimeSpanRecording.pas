@@ -1,6 +1,6 @@
 {$IFDEF FPC}
 {$MODE Delphi}
-{ $I InnovaLibDefsLaz.inc}
+{ $I InnovaLibDefsLaz.inc }
 {$ELSE}
 {$I InnovaLibDefs.inc}
 {$ENDIF}
@@ -9,25 +9,34 @@ unit IsObjectTimeSpanRecording;
 interface
 
 uses
-  {$IFDEF FPC}
+{$IFDEF FPC}
   SysUtils,
   Classes,
+  SyncObjs,
   IsLazTimeSpan,
-  //Diagnostics,
-  {$Else}
+  // Diagnostics,
+{$ELSE}
   System.SysUtils,
   System.Classes,
+  // System.Contnrs,
   System.TimeSpan,
   System.Diagnostics,
-  {$Endif}
+  System.SyncObjs,
+{$ENDIF}
   IsLogging;
 
 type
+  TLifeTimeStats = Class;
 
   TObjTimeSpanRecording = Class(Tobject)
   private
+    FLockTSRec: TCriticalSection;
     FDataList: TStringList; // Of LifeTimeStats Objs
-    Procedure AddCount(AObjClosing: Tobject; ADuration: TTimeSpan);
+    Procedure AddCountData(AObjClosing: Tobject; ADuration: TTimeSpan);
+    Procedure AddCreateInfo(AObjCreated: Tobject);
+    Procedure WaitTsRecRelease;
+    Function WaitTSRecLock: Boolean;
+    Function LifeTimeStatsObject(AObjClosing: Tobject): TLifeTimeStats;
   public
     Constructor Create; virtual;
     Destructor Destroy; Override;
@@ -39,19 +48,26 @@ type
     Constructor Create; Override;
     Class Procedure RecordObjectLifeTimeOnDestroy(AObjClosing: Tobject;
       ADuration: TTimeSpan);
+    Class Procedure RecordObjectOnCreate(AObjCreating: Tobject);
     Class Function SingletonLifeTimeStats: string;
     Class Procedure ReleaseSingletonTimeStats;
   End;
 
   TLifeTimeStats = Class(Tobject)
   Private
+    FLockLTRec: TCriticalSection;
+    FObjList: TList;
     FObjectName: string;
     FCount: Integer;
     FMaxSecs, FMinSecs: Double;
     FRunningAverageSecs, FSumOfSquaresSecs: Double;
+    Procedure WaitLsRecRelease;
+    Function WaitLSRecLock: Boolean;
   Public
     Constructor Create(AName: String);
+    Destructor Destroy; override;
     Procedure AddData(ADuration: TTimeSpan);
+    Procedure CheckDoubleFree(AObject: Tobject; AAdd: Boolean);
     Function StatsReport: string;
   End;
 
@@ -75,10 +91,55 @@ begin
     FSumOfSquaresSecs, FCount);
 end;
 
+procedure TLifeTimeStats.CheckDoubleFree(AObject: Tobject; AAdd: Boolean);
+Var
+  Index: Integer;
+  Err: String;
+begin
+  Err := '';
+  if WaitLSRecLock then
+    Try
+      Index := FObjList.IndexOf(AObject);
+      if AAdd then
+      Begin
+        if Index < 0 then
+          FObjList.Add(AObject)
+        Else
+          Err := 'Object already in Stats';
+      End
+      else
+      Begin
+        if Index < 0 then
+          Err := 'Object already Freed In Stats'
+        Else
+          FObjList.Delete(Index);
+      End;
+    Finally
+      WaitLsRecRelease;
+    End;
+  // Outside lock
+  if Err <> '' then
+    ApplicationFlagThreadMsg(AObject, Err, True);
+  if Err <> '' then
+    begin
+      Sleep(100);
+      raise EAccessViolation.Create('CheckDoubleFree Message::' + err);
+    end;
+end;
+
 constructor TLifeTimeStats.Create(AName: String);
 begin
   inherited Create;
   FObjectName := AName;
+  FObjList := TList.Create;
+  FLockLTRec := TCriticalSection.Create;
+end;
+
+destructor TLifeTimeStats.Destroy;
+begin
+  FLockLTRec.Free;
+  FObjList.Free;
+  inherited;
 end;
 
 function TLifeTimeStats.StatsReport: string;
@@ -102,43 +163,75 @@ begin
   End;
 end;
 
+function TLifeTimeStats.WaitLSRecLock: Boolean;
+var
+  Count: Integer;
+begin
+  Result := false;
+  Count := 5;
+  While Not Result and (Count > 0) do
+  Begin
+    Result := FLockLTRec.TryEnter;
+    if Not Result then
+    Begin
+      Dec(Count);
+      Sleep(200);
+    End;
+  End;
+  if not Result then
+    ApplicationFlagThreadMsg(self, 'No Lock on TLifeTimeStats', True);
+end;
+
+procedure TLifeTimeStats.WaitLsRecRelease;
+begin
+  FLockLTRec.Release;
+end;
+
 { TObjTimeSpanRecording }
 Var
   GlobalRecording: TSingletonObjTimeSpanRecording = nil;
 
-procedure TObjTimeSpanRecording.AddCount(AObjClosing: Tobject;
+procedure TObjTimeSpanRecording.AddCountData(AObjClosing: Tobject;
   ADuration: TTimeSpan);
 Var
-  Idx: Integer;
   ThisClassObj: TLifeTimeStats;
-  ThisClassName: String;
+
 begin
   if AObjClosing = nil then
     Exit;
-
-  ThisClassObj := nil;
-  ThisClassName := AObjClosing.ClassName;
-  if FDataList.Find(ThisClassName, Idx) then
-  Begin
-    if FDataList.Objects[Idx] is TLifeTimeStats then
-      ThisClassObj := TLifeTimeStats(FDataList.Objects[Idx]);
-  End
-  else
-  Begin
-    ThisClassObj := TLifeTimeStats.Create(ThisClassName);
-    FDataList.AddObject(ThisClassObj.FObjectName, ThisClassObj);
-  End;
-
+  ThisClassObj := LifeTimeStatsObject(AObjClosing);
   if ThisClassObj <> nil then
     ThisClassObj.AddData(ADuration);
+  if ThisClassObj = nil then
+    ApplicationFlagThreadMsg(AObjClosing, 'Closing Non created Class', True)
+  else
+    ThisClassObj.CheckDoubleFree(AObjClosing, false);
+end;
+
+procedure TObjTimeSpanRecording.AddCreateInfo(AObjCreated: Tobject);
+Var
+  ThisClassObj: TLifeTimeStats;
+
+begin
+  if AObjCreated = nil then
+    Exit;
+
+  ThisClassObj := LifeTimeStatsObject(AObjCreated);
+
+  if ThisClassObj = nil then
+    ApplicationFlagThreadMsg(AObjCreated,
+      'Object Class Stats Record Fail', True)
+  else
+    ThisClassObj.CheckDoubleFree(AObjCreated, True);
 end;
 
 constructor TObjTimeSpanRecording.Create;
 begin
   inherited;
   FDataList := TStringList.Create; // Of LifeTimeStats Objs
-  FDataList.Sorted := true;
-  FDataList.OwnsObjects := true;
+  FDataList.Sorted := True;
+  FDataList.OwnsObjects := True;
+  FLockTSRec := TCriticalSection.Create;
 end;
 
 destructor TObjTimeSpanRecording.Destroy;
@@ -150,7 +243,7 @@ begin
   if GlobalRecording <> nil then
     if GlobalRecording = self then
     begin
-      LogFin := TLogFile.Create(ExceptionLogName, true, 5000000, true, false);
+      LogFin := TLogFile.Create(ExceptionLogName, True, 5000000, True, false);
       Try
         Msg := TSingletonObjTimeSpanRecording.SingletonLifeTimeStats;
         LogFin.LogALine('TObjTimeSpanRecording.Destroy'#13#10 + Msg);
@@ -160,7 +253,34 @@ begin
       End;
     end;
   FDataList.Free;
+  FLockTSRec.Free;
   inherited;
+end;
+
+function TObjTimeSpanRecording.LifeTimeStatsObject(AObjClosing: Tobject)
+  : TLifeTimeStats;
+Var
+  Idx: Integer;
+  ThisClassName: String;
+begin
+  Result := nil;
+  ThisClassName := AObjClosing.ClassName;
+
+  If WaitTSRecLock then
+    Try
+      if FDataList.Find(ThisClassName, Idx) then
+      Begin
+        if FDataList.Objects[Idx] is TLifeTimeStats then
+          Result := TLifeTimeStats(FDataList.Objects[Idx]);
+      End
+      else
+      Begin
+        Result := TLifeTimeStats.Create(ThisClassName);
+        FDataList.AddObject(Result.FObjectName, Result);
+      End;
+    Finally
+      WaitTsRecRelease;
+    End;
 end;
 
 function TObjTimeSpanRecording.ObjectLifeTimeStats: string;
@@ -175,6 +295,30 @@ begin
     if FDataList.Objects[I] is TLifeTimeStats then
       Result := Result + #13#10 + TLifeTimeStats(FDataList.Objects[I])
         .StatsReport;
+end;
+
+function TObjTimeSpanRecording.WaitTSRecLock: Boolean;
+var
+  Count: Integer;
+begin
+  Result := false;
+  Count := 5;
+  While Not Result and (Count > 0) do
+  Begin
+    Result := FLockTSRec.TryEnter;
+    if Not Result then
+    Begin
+      Dec(Count);
+      Sleep(200);
+    End;
+  End;
+  if not Result then
+    ApplicationFlagThreadMsg(self, 'No Lock on TObjTimeSpanRecording', True);
+end;
+
+procedure TObjTimeSpanRecording.WaitTsRecRelease;
+begin
+  FLockTSRec.Release;
 end;
 
 { TSingletonObjTimeSpanRecording }
@@ -193,7 +337,17 @@ begin
     GlobalRecording := TSingletonObjTimeSpanRecording.Create;
 
   if GlobalRecording <> nil then
-    GlobalRecording.AddCount(AObjClosing, ADuration);
+    GlobalRecording.AddCountData(AObjClosing, ADuration);
+end;
+
+class procedure TSingletonObjTimeSpanRecording.RecordObjectOnCreate
+  (AObjCreating: Tobject);
+begin
+  if GlobalRecording = nil then
+    GlobalRecording := TSingletonObjTimeSpanRecording.Create;
+
+  if GlobalRecording <> nil then
+    GlobalRecording.AddCreateInfo(AObjCreating);
 end;
 
 class procedure TSingletonObjTimeSpanRecording.ReleaseSingletonTimeStats;

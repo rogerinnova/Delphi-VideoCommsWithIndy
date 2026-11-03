@@ -19,7 +19,7 @@ interface
 
 uses
 {$IFDEF FPC}
-  Classes, UITypes, SyncObjs, SysUtils, // IOUtils,
+  Classes, {UITypes,} SyncObjs, SysUtils, // IOUtils,
 
 {$ELSE}
 {$IFDEF ISXE2_DELPHI}
@@ -6990,11 +6990,13 @@ var
   GreaterThan127, NeedAllHex: boolean;
   DataLength: integer;
 Begin
+  Result := '';
   Len := Length(ByteData);
+  if Len<1 then Exit;
+
   if Len > AMaxLenth then
     Len := AMaxLenth;
   try
-    Result := '';
     if Len < 1 then
       Exit;
 
