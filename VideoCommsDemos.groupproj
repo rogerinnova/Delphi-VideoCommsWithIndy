@@ -33,7 +33,7 @@
         <Projects Include="VideoCommsExamples\TCPApplicationsDemoService.dproj">
             <Dependencies/>
         </Projects>
-        <Projects Include="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj">
+        <Projects Include="VideoCommsExamples\Alexandria\AlexDummyImagesForAppSrvrWin7VmD11.dproj">
             <Dependencies/>
         </Projects>
         <Projects Include="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\MultiPlatDev\MobileDeviceComms\FmxSendTestGenerator\ExportFmxWindowsUseCammeraForAppSrvr.dproj">
@@ -43,6 +43,9 @@
             <Dependencies/>
         </Projects>
         <Projects Include="..\..\..\PrivateGit\RogersLazarus\LazSharedCode\MemoryTests\dynamic_array_tst.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj">
             <Dependencies/>
         </Projects>
     </ItemGroup>
@@ -143,14 +146,14 @@
     <Target Name="TCPApplicationsDemoService:Make">
         <MSBuild Projects="VideoCommsExamples\TCPApplicationsDemoService.dproj" Targets="Make"/>
     </Target>
-    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr">
-        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj"/>
+    <Target Name="AlexDummyImagesForAppSrvrWin7VmD11">
+        <MSBuild Projects="VideoCommsExamples\Alexandria\AlexDummyImagesForAppSrvrWin7VmD11.dproj"/>
     </Target>
-    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr:Clean">
-        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj" Targets="Clean"/>
+    <Target Name="AlexDummyImagesForAppSrvrWin7VmD11:Clean">
+        <MSBuild Projects="VideoCommsExamples\Alexandria\AlexDummyImagesForAppSrvrWin7VmD11.dproj" Targets="Clean"/>
     </Target>
-    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr:Make">
-        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj" Targets="Make"/>
+    <Target Name="AlexDummyImagesForAppSrvrWin7VmD11:Make">
+        <MSBuild Projects="VideoCommsExamples\Alexandria\AlexDummyImagesForAppSrvrWin7VmD11.dproj" Targets="Make"/>
     </Target>
     <Target Name="ExportFmxWindowsUseCammeraForAppSrvr">
         <MSBuild Projects="Z:\RogerHome\RepositoryHg\InnovaSolHomeOnSalmon\Delphi Projects\MultiPlatDev\MobileDeviceComms\FmxSendTestGenerator\ExportFmxWindowsUseCammeraForAppSrvr.dproj"/>
@@ -179,14 +182,23 @@
     <Target Name="dynamic_array_tst:Make">
         <MSBuild Projects="..\..\..\PrivateGit\RogersLazarus\LazSharedCode\MemoryTests\dynamic_array_tst.dproj" Targets="Make"/>
     </Target>
+    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr">
+        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj"/>
+    </Target>
+    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr:Clean">
+        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="PrototypeWindowsOnlyDummyImagesForAppSrvr:Make">
+        <MSBuild Projects="VideoCommsExamples\ProtoTypeMobile\PrototypeWindowsOnlyDummyImagesForAppSrvr.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="VclImageDemo;FMXImageDemo;TCPClientDemoApp;FMXDummyImagesForAppSrvr;FMXD11DummyImagesForAppSrvr;ProjectDoTimestamp;PrototypeWindowsOnlySendTest;VCLApplicationSrver;ConsoleAppDemoService;TCPApplicationsDemoService;PrototypeWindowsOnlyDummyImagesForAppSrvr;ExportFmxWindowsUseCammeraForAppSrvr;ExportFmxWindowsDummyImagesForAppSrvr;dynamic_array_tst"/>
+        <CallTarget Targets="VclImageDemo;FMXImageDemo;TCPClientDemoApp;FMXDummyImagesForAppSrvr;FMXD11DummyImagesForAppSrvr;ProjectDoTimestamp;PrototypeWindowsOnlySendTest;VCLApplicationSrver;ConsoleAppDemoService;TCPApplicationsDemoService;AlexDummyImagesForAppSrvrWin7VmD11;ExportFmxWindowsUseCammeraForAppSrvr;ExportFmxWindowsDummyImagesForAppSrvr;dynamic_array_tst;PrototypeWindowsOnlyDummyImagesForAppSrvr"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="VclImageDemo:Clean;FMXImageDemo:Clean;TCPClientDemoApp:Clean;FMXDummyImagesForAppSrvr:Clean;FMXD11DummyImagesForAppSrvr:Clean;ProjectDoTimestamp:Clean;PrototypeWindowsOnlySendTest:Clean;VCLApplicationSrver:Clean;ConsoleAppDemoService:Clean;TCPApplicationsDemoService:Clean;PrototypeWindowsOnlyDummyImagesForAppSrvr:Clean;ExportFmxWindowsUseCammeraForAppSrvr:Clean;ExportFmxWindowsDummyImagesForAppSrvr:Clean;dynamic_array_tst:Clean"/>
+        <CallTarget Targets="VclImageDemo:Clean;FMXImageDemo:Clean;TCPClientDemoApp:Clean;FMXDummyImagesForAppSrvr:Clean;FMXD11DummyImagesForAppSrvr:Clean;ProjectDoTimestamp:Clean;PrototypeWindowsOnlySendTest:Clean;VCLApplicationSrver:Clean;ConsoleAppDemoService:Clean;TCPApplicationsDemoService:Clean;AlexDummyImagesForAppSrvrWin7VmD11:Clean;ExportFmxWindowsUseCammeraForAppSrvr:Clean;ExportFmxWindowsDummyImagesForAppSrvr:Clean;dynamic_array_tst:Clean;PrototypeWindowsOnlyDummyImagesForAppSrvr:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="VclImageDemo:Make;FMXImageDemo:Make;TCPClientDemoApp:Make;FMXDummyImagesForAppSrvr:Make;FMXD11DummyImagesForAppSrvr:Make;ProjectDoTimestamp:Make;PrototypeWindowsOnlySendTest:Make;VCLApplicationSrver:Make;ConsoleAppDemoService:Make;TCPApplicationsDemoService:Make;PrototypeWindowsOnlyDummyImagesForAppSrvr:Make;ExportFmxWindowsUseCammeraForAppSrvr:Make;ExportFmxWindowsDummyImagesForAppSrvr:Make;dynamic_array_tst:Make"/>
+        <CallTarget Targets="VclImageDemo:Make;FMXImageDemo:Make;TCPClientDemoApp:Make;FMXDummyImagesForAppSrvr:Make;FMXD11DummyImagesForAppSrvr:Make;ProjectDoTimestamp:Make;PrototypeWindowsOnlySendTest:Make;VCLApplicationSrver:Make;ConsoleAppDemoService:Make;TCPApplicationsDemoService:Make;AlexDummyImagesForAppSrvrWin7VmD11:Make;ExportFmxWindowsUseCammeraForAppSrvr:Make;ExportFmxWindowsDummyImagesForAppSrvr:Make;dynamic_array_tst:Make;PrototypeWindowsOnlyDummyImagesForAppSrvr:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

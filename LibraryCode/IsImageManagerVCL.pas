@@ -107,6 +107,7 @@ Type
     FLinkVideoComs: TVideoComsChannel;
     FLastRxGraphicTime: TTimeSpan;
     FActiveChnl: Boolean;
+    Function ImageLockTry: Boolean;
     Function RxAnsiString(ACommand: ansistring; ATcpSession: TISIndyTCPBase)
       : ansistring;
     Procedure RxGraphic(AGraphic: TGraphic);
@@ -576,11 +577,22 @@ procedure TImageMngrVCL.LoopAllLinksInIdle;
 Var
   I: Integer;
 begin
-  if FListOfCurrentVideoRx = nil then
-    Exit;
-  For I := 0 to FListOfCurrentVideoRx.Count - 1 Do
-    if FListOfCurrentVideoRx.Objects[I] is TVideoChnlLinkVCL then
-      TVideoChnlLinkVCL(FListOfCurrentVideoRx.Objects[I]).RunInIdleLoop;
+  try
+    if FListOfCurrentVideoRx = nil then
+      Exit;
+    For I := 0 to FListOfCurrentVideoRx.Count - 1 Do
+      try
+        if FListOfCurrentVideoRx.Objects[I] is TVideoChnlLinkVCL then
+          TVideoChnlLinkVCL(FListOfCurrentVideoRx.Objects[I]).RunInIdleLoop;
+      Except
+        On EE: Exception do
+          ISIndyUtilsException(FListOfCurrentVideoRx.Objects[I], EE,
+            'LoopAllLinksInIdle::' + IntToStr(I));
+      end;
+  Except
+    On E: Exception do
+      ISIndyUtilsException(Self, E, 'LoopAllLinksInIdle');
+  end;
 end;
 
 procedure TImageMngrVCL.RemoveVideoLink(ALink: TVideoChnlLinkVCL);
@@ -1101,8 +1113,8 @@ begin
       ISIndyUtilsException(Self, '#LnkChnlClosing No Ref');
   Try
     if FLinkVideoComs = nil then
-     ApplicationFlagThreadMsg(Self,'Not freeing');
-//      Free;     ????
+      ApplicationFlagThreadMsg(Self, 'Not freeing');
+    // Free;     ????
   Except
     On E: Exception do
       ISIndyUtilsException(Self, '#LnkChnlClosing Free');
@@ -1191,7 +1203,8 @@ begin
       FImage := nil;
 
       if GblRptTimeoutClear then
-        ISIndyUtilsException(Self, '#Not ChannelActiveWithGraphic ::' + LinkTxtId);
+        ISIndyUtilsException(Self, '#Not ChannelActiveWithGraphic ::' +
+          LinkTxtId);
 
       FLinkVideoComs.OffThreadDestroy(False);
       FLinkVideoComs := nil;
@@ -1204,6 +1217,29 @@ begin
       ISIndyUtilsException(Self, E, 'DisConnectInactiveChannel');
     end;
   end;
+end;
+
+function TVideoChnlLinkVCL.ImageLockTry: Boolean;
+Var
+  Count: Integer;
+begin
+  if FImageLock <> nil then
+    Result := FImageLock.TryEnter
+  else
+    Result := False;
+  if Result or (FImageLock = nil) then
+    Exit;
+
+  Count := 5;
+  while Not Result and (Count > 0) do
+  begin
+    Dec(Count);
+    Sleep(100);
+    Result := FImageLock.TryEnter;
+  end;
+
+  if Not Result then
+   ApplicationFlagThreadMsg(self,'unable to lock Image');
 end;
 
 procedure TVideoChnlLinkVCL.RunInIdleLoop;
@@ -1234,7 +1270,7 @@ begin
               SyncWait.ToString + ' on ' + FLinkVideoComs.TextId);
         end;
         FActiveChnl := true;
-        If FImageLock.TryEnter then
+        If ImageLockTry then
           try
             FImage.BitMap := FStoredRxImage;
             // Bitmap is assigned >> Refcount data inc
@@ -1287,7 +1323,7 @@ begin
     else if FImage is TImageControl then
       if AGraphic = nil then
       Begin
-        If FImageLock.TryEnter then
+        If ImageLockTry then
           try
             FreeAndNil(FStoredRxImage);
           finally
@@ -1301,8 +1337,9 @@ begin
       Begin
         if not FAssignToIdle then
           raise Exception.Create('RxGraphic not Assigned to idle');
+
         if FLinkVideoComs <> nil then
-          If FImageLock.TryEnter then
+          If ImageLockTry then
             try
               if FStoredRxImage = nil then
                 FStoredRxImage := FLinkVideoComs.GraphicCopy(AGraphic)

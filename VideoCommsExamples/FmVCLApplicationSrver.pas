@@ -145,6 +145,7 @@ type
     Procedure DoIdleFunctions(Sender: TObject; var Done: Boolean);
     Function CommsServer: TIsIndyApplicationServer;
     Function ImageManager: TImageMngrVCL;
+    Function TryWaitSyncAcquire: Boolean;
     Function WaitSync: TCriticalSection;
     Function OnAnsiStringRxPrimaryServer(ACommand: AnsiString;
       ATcpSession: TISIndyTCPBase): AnsiString;
@@ -1527,7 +1528,6 @@ procedure TServerForm.DoIdleFunctions(Sender: TObject; var Done: Boolean);
 begin
   Try
     ImageManager.LoopAllLinksInIdle;
-
   Except
     On E: exception do
       ISIndyUtilsException(self, E, 'DoIdleFunctions');
@@ -2346,7 +2346,10 @@ begin
   Try
     Try
       if FFormInDestroy then
+      Begin
+        ISIndyUtilsException(self, 'Closing Form #TimerCleanupTimer');
         Exit;
+      End;
       if FActivityMonitor = nil then
       Begin
         FActivityMonitor := TMonitorVclActivityThread.Create(self);
@@ -2400,13 +2403,13 @@ begin
           { Incoming data from TCP sessions act in their own thread unless"SynchronizeResults is set.
             Without"SynchronizeResults thread safety requires interactions to be managed. }
 
-          WaitSync.Acquire;
-          Try
-            MmoInfo.Lines.Add(FRxText);
-            FRxText := '';
-          Finally
-            FWaitSync.Release;
-          End;
+          If TryWaitSyncAcquire then
+            Try
+              MmoInfo.Lines.Add(FRxText);
+              FRxText := '';
+            Finally
+              FWaitSync.Release;
+            End;
           MmoInfo.Lines.Add('End Server Side RX Data');
         End;
       Except
@@ -2468,24 +2471,46 @@ begin
         { Incoming data from TCP sessions act in their own thread unless"SynchronizeResults is set.
           Without"SynchronizeResults thread safety requires interactions to be managed. }
 
-        WaitSync.Acquire;
-        Try
-          MmoInfo.Lines.Add(FRxText);
-          FRxText := '';
-        Finally
-          FWaitSync.Release;
-        End;
+        If TryWaitSyncAcquire Then
+          Try
+            MmoInfo.Lines.Add(FRxText);
+            FRxText := '';
+          Finally
+            FWaitSync.Release;
+          End;
         MmoInfo.Lines.Add('End Server Side RX Data');
       End;
     Except
-{$IFDEF MSWindows}
       On E: exception do
-        OutputDebugString(PChar('LogFile Exception::' + E.Message));
-{$ENDIF}
+        ISIndyUtilsException(self, E, '#TimerStatusTimer');
     End;
   Finally
     TimerStatus.Enabled := true;
   End;
+end;
+
+function TServerForm.TryWaitSyncAcquire: Boolean;
+Var
+  Count: integer;
+begin
+  if not FFormInDestroy then
+    Result := WaitSync.TryEnter
+  Else
+    Result := False;
+  if Result or (FWaitSync = nil) Then
+    Exit
+  else
+  begin
+    Count := 3;
+    while not Result and (Count > 0) do
+    begin
+      Dec(Count);
+      sleep(100);
+      Result := FWaitSync.TryEnter;
+    end;
+    if not Result then
+      ISIndyUtilsException(self, '# unable to lock Waitsync');
+  end;
 end;
 
 function TServerForm.WaitSync: TCriticalSection;
@@ -2537,7 +2562,10 @@ begin
       if not FFormIsActive then
         ISIndyUtilsException(self, '#Execute Timeout ' + IntToStr(MsgCount));
       if MsgCount < 1 then
+      Begin
         MsgCount := 50;
+        FreeAndNil(ServerForm);
+      End;
     Except
       On E: exception do
         ISIndyUtilsException(self, E, '#Execute Close Thread ' +

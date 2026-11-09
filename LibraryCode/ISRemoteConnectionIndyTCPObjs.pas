@@ -144,18 +144,19 @@ Type
   Private
     FMsgBfrListLock: TCriticalSection;
     FData: TStringlist;
+    Function MsgBfrListLockTryAcquire: Boolean;
   public
     Constructor Create;
     Destructor Destroy; override;
     Procedure AddBuffMsgStr(AMsg: String);
     Procedure AddBuffMsgAnsi(AMsg: ansistring);
     Procedure AddBuffLogMsg(AId, AMsg: String);
-    Function MsgToRead(out AMsg: String; AReadLines: integer = 0): boolean;
+    Function MsgToRead(out AMsg: String; AReadLines: integer = 0): Boolean;
   end;
 
   TISIndyTCPBase = Class(TObject)
   Strict Private
-    FConnected: boolean;
+    FConnected: Boolean;
     FTCPLock: TCriticalSection;
     FReadWaitCount: integer;
     FBasePortID: String;
@@ -167,17 +168,17 @@ Type
     Procedure ProcessHeaderWithoutLeftOver(Var ABuffer: TIdBytes);
   Private
     FTcpLockNo, FThreadID: TThreadID;
-    FReadInMainThread: boolean;
+    FReadInMainThread: Boolean;
     fPeerPort, FPort: TIdPort;
     fPeerIP, FIP: String;
-    FClosedForcfullyOrGracefully: boolean;
+    FClosedForcfullyOrGracefully: Boolean;
     FFileAccessBasePath: String;
     // FFullDupLogList, FLogList: TStringlist;
     // FLoggingListLock: TCriticalSection; // For async Log messages
     FTotalSessionRead: Int64;
     FLogsMissed, FCountFillBufferErrors: integer;
     FLastData: ansistring;
-    FConnectionCounted: boolean;
+    FConnectionCounted: Boolean;
 {$IFNDEF  SuppressIPMetering}
     FMaxReadTm, FMinReadTm: Double;
     FAveReadTm, FAveReadSumSqs: Double;
@@ -198,11 +199,11 @@ Type
       out ATransactionSize: Longword; out AKey, ANewData: ansistring);
     Function IsValid(AStartOffset: integer; Var ABuffer: TIdBytes;
       ACharsRead: integer; out ATransactionSize: Longword;
-      out AKey, ANewData: ansistring): boolean;
+      out AKey, ANewData: ansistring): Boolean;
     function CheckOutputData(AData: ansistring): ansistring;
   Protected
     // while testing
-    FRecoveredValidData: boolean;
+    FRecoveredValidData: Boolean;
     FNextWriteBusyDate, FNextReadBusyDate: TTimeSpan;
     FDecWriteCount, FDecReadCount: integer;
     FConnection: TIdTCPConnection;
@@ -216,12 +217,12 @@ Type
     FReadDataWaitDiv5: integer;
     FLastLoggedTimeStampError, FHoldDuplexTill, FLastFullDplxIncoming
       : TTimeSpan;
-    FCloseOnTimeOut, fFullDuplex: boolean;
+    FCloseOnTimeOut, fFullDuplex: Boolean;
     // False except for TISIndyTCPFullDuplexClient
     FRandomKey: ansistring;
     FOnAnsiStringAction: TComandActionAnsi;
     FClosingTcpSocket, // Disable Synchronize
-    FSynchronizeResults: boolean;
+    FSynchronizeResults: Boolean;
     FOnSimpleDuplexRemoteAction: TComandActionAnsi;
     FOnDestroy: TISIndyTCPEvent;
     FChnlStopWatch: TStopWatch;
@@ -232,11 +233,11 @@ Type
     function FillBufferWithLeftOver(Var ABuffer: TIdBytes): integer;
     function ReadATransactionRecord(var ATrnctType: TTCPTransactionTypes;
       var AKey: ansistring): ansistring; Virtual;
-    function DoFullDuplexIncomingAction(AData: ansistring): boolean; Virtual;
+    function DoFullDuplexIncomingAction(AData: ansistring): Boolean; Virtual;
     function RecoverTrnsString(AData: ansistring): String;
     Procedure SetConnection(AConnection: TIdTCPConnection);
     procedure WasClosedForcfullyOrGracefully; Virtual;
-    function CheckConnection: boolean; Virtual;
+    function CheckConnection: Boolean; Virtual;
     // put byte data as one to three lines in log msg
     function BytesToLogText(const AData: ansistring): String; overload;
     function BytesToLogText(const AData: array of Byte): String; overload;
@@ -246,7 +247,7 @@ Type
     // Blocking transaction On full Duplex Session will Wait until readThread Releases
     function Write(AData: RawByteString): integer; Virtual;
     function ReadOneTransToBuffer(var ABuffer: TIdBytes): integer;
-    function WaitForData(AWaitTime: integer): boolean;
+    function WaitForData(AWaitTime: integer): Boolean;
     function GetBlockFromServerFileTransaction(const AFileName: ansistring;
       ABlockStart: Int64; ABlockSz: Int32): ansistring;
     function PutBlockToServerFileTransaction(const AFileName,
@@ -255,18 +256,18 @@ Type
     // function PackFileSnapShotName(const AFileName: ansistring): ansistring;
     // function PackDeleteSnapShot(const AFileName: ansistring): ansistring;
     function DecodeSafeFileTransferPath(ACmdPlusPath: string): ansistring;
-    function IsUploadAcceptTempFile(AFileName: string): boolean;
+    function IsUploadAcceptTempFile(AFileName: string): Boolean;
     function SimpleRemoteAction(const AFunction: ansistring): ansistring;
-    Function CheckWriteBusy: boolean; Virtual;
-    Function CheckReadBusy: boolean; Virtual;
-    Function LockConnection: boolean;
-    Function LockConnectionSkt(Out ASocket: TIdIOHandlerSocket): boolean;
-    Function LockConnectionCon(Out AConnection: TIdTCPConnection): boolean;
+    Function CheckWriteBusy: Boolean; Virtual;
+    Function CheckReadBusy: Boolean; Virtual;
+    Function LockConnection: Boolean;
+    Function LockConnectionSkt(Out ASocket: TIdIOHandlerSocket): Boolean;
+    Function LockConnectionCon(Out AConnection: TIdTCPConnection): Boolean;
     // function DecodeSafeFileTransferPath(ACmdPlusPath: string): ansistring;
     Procedure LockConnectionFree;
     Procedure HandleCoupleSessionDropReferences;
     Procedure ApplicationProcessMessages;
-    Procedure SetFullDuplex(Val: boolean); Virtual;
+    Procedure SetFullDuplex(Val: Boolean); Virtual;
     // procedure AddFullDuplexLogMessage(TextID, AMsg: String);
     // procedure AddLogMessage(ATextID, AMsg: String);
     procedure CloseConnection; virtual;
@@ -279,11 +280,11 @@ Type
     procedure LogTimeStampFail(AData: ansistring; AMessage: string);
   Public
 {$IFDEF Debug}
-    FIsDebugchnl: boolean;
+    FIsDebugchnl: Boolean;
     // Set in readloop writeloop and ProcessNextSrvrTransaction
 {$ENDIF}
     FCoupledSession: TISIndyTCPBase;
-    FOwnsCoupledSession: boolean;
+    FOwnsCoupledSession: Boolean;
 {$IFNDEF  SuppressIPMetering}
     Function TickStatsAsString: String;
 {$ENDIF}
@@ -292,18 +293,18 @@ Type
     Function FullDuplexDispatch(AData: ansistring; AKey: ansistring
 {$IFNDEF NextGen}
       = '' // Not Next Gen
-{$ENDIF} ): boolean; virtual;
+{$ENDIF} ): Boolean; virtual;
     // Non Blocking transaction On full Duplex Session Starts readThread
     Function RemoteAddress: ansistring;
     Function LocalAddress: ansistring;
-    function BindingIsLocal(ABind: TIdSocketHandle): boolean;
-    function CallOnLocalSubNet: boolean;
+    function BindingIsLocal(ABind: TIdSocketHandle): Boolean;
+    function CallOnLocalSubNet: Boolean;
     function TextID: String; Virtual;
     function PortId: String; Virtual;
     // function ReadFullDuplexLogMessage: String;
     // function ReadLogMessage: String;
-    function CloseIsObjGracefully: boolean;
-    Function RecentData(AGap: TTimeSpan): boolean;
+    function CloseIsObjGracefully: Boolean;
+    Function RecentData(AGap: TTimeSpan): Boolean;
     Class function RawToByteArray(AData: RawByteString): TIdBytes;
     Class function StreamAsString(AStrm: Tstream): ansistring;
     // Procedure LogAMessage(AMsg: String); virtual;
@@ -331,7 +332,7 @@ Type
       Write FOnAnsiStringAction;
     Property OnDestroy: TISIndyTCPEvent read FOnDestroy write FOnDestroy;
     Class Function ExpandSrvRefCode(Const ACode: string; Out ASrv: String;
-      out AServPort: integer): boolean;
+      out AServPort: integer): Boolean;
     Class Function EnCodeSrvRefCode(Const ASrv: String;
       AServPort: integer): String;
   End;
@@ -345,7 +346,7 @@ Type
     fDoAfterConnection { , fOnDisconnect } : TISIndyTCPEvent;
     fServerAddress: String;
     fServerPort: integer;
-    fInReconnect, fCreatedViaStartAccess: boolean;
+    fInReconnect, fCreatedViaStartAccess: Boolean;
     FDoNotTryAgainUntil: TDateTime;
     { For testing
       procedure WhenConnected(ASender: TIdConnectionIntercept);
@@ -355,37 +356,37 @@ Type
       procedure WhenSend(ASender: TIdConnectionIntercept; var ABuffer: TIdBytes);
     }
 {$IFNDEF  SuppressIPMetering}
-    FTimeStampMetering: boolean;
-    procedure SetTimeStampMetering(const Value: boolean);
+    FTimeStampMetering: Boolean;
+    procedure SetTimeStampMetering(const Value: Boolean);
 {$ENDIF}
     procedure SetAddress(const Value: String); Override;
     function GetAddress: String; Override;
     procedure SetPort(const Value: TIdPort); Override;
-    function GetActive: boolean;
+    function GetActive: Boolean;
     function IdTCPClientCon(AHost: String; APort: integer): TIdTCPClient;
-    procedure SetActive(const Value: boolean);
+    procedure SetActive(const Value: Boolean);
     procedure FreeOldSocket(Sender: TObject);
-    procedure SetPermHold(const Value: boolean);
+    procedure SetPermHold(const Value: Boolean);
   Protected
     FRtnList: TStrings;
     FRtnData: ansistring;
     FRtnTrnctType: TTCPTransactionTypes;
     FRtnKey: ansistring;
     FPoleInterval, FNextPoll: TTimeSpan;
-    FPermHold: boolean;
-    FEncrypted, FNotAuthorized, FSecAuthStatus: boolean;
+    FPermHold: Boolean;
+    FEncrypted, FNotAuthorized, FSecAuthStatus: Boolean;
     procedure TstServerPoll;
     function Write(AData: RawByteString): integer; override;
     procedure SendTransaction(AData: ansistring;
       out ATrnctType: TTCPTransactionTypes;
       out AKey, ANewData: ansistring); Override;
     procedure WasClosedForcfullyOrGracefully; Override;
-    function CheckConnection: boolean; Override;
-    function MakeConnection: boolean;
+    function CheckConnection: Boolean; Override;
+    function MakeConnection: Boolean;
     procedure CloseConnection; Override;
     function Reconnect(const ACurrentTransanction: ansistring)
-      : boolean; Virtual;
-    Property PermHold: boolean read FPermHold write SetPermHold;
+      : Boolean; Virtual;
+    Property PermHold: Boolean read FPermHold write SetPermHold;
   Public
     Constructor Create; override;
     Constructor StartAccess(const AServerName: String; APort: integer;
@@ -400,34 +401,34 @@ Type
     Function RestartCommsServer: String;
     Function GetIdleTimeOutFrmServer: integer; // no of seconds
     Function ServerConnections(AResults: TStrings;
-      ARegThisValue: ansistring): boolean;
-    Function ServerSetRefConnection(AReferenceValue: ansistring): boolean;
+      ARegThisValue: ansistring): Boolean;
+    Function ServerSetRefConnection(AReferenceValue: ansistring): Boolean;
     // Add  AReferenceValue checks AReferenceValue exists on server
     // Similar to
     // function TISIndyTCPClient.ServerConnections(nil, ARegThisValue: ansistring)
     // But result checks AReferenceValue exists
-    Function IsLinked: boolean;
+    Function IsLinked: Boolean;
     Function GetLinkStatus(ALocalPort, ALinkedLocalPort: integer;
       ALinkRef: ansistring; Var Aregistrations: ansistring): TLinkStates;
     Function StringTransaction(aString: String): String;
-    Function PollDue: boolean;
-    Function Activate: boolean;
+    Function PollDue: Boolean;
+    Function Activate: Boolean;
     Function CopyLargeServerFileToStream(AStream: Tstream;
-      const AServerFileName: ansistring): boolean;
+      const AServerFileName: ansistring): Boolean;
     Function PutLargeStreamToServer(AStream: Tstream;
-      const AServerFileName: ansistring): boolean;
+      const AServerFileName: ansistring): Boolean;
     function TextID: String; override;
     function PortId: String; override;
 
     // Property OnDisconnect: TISIndyTCPEvent Read fOnDisconnect
     // Write fOnDisconnect;
-    Property Active: boolean read GetActive write SetActive;
+    Property Active: Boolean read GetActive write SetActive;
     Property DoAfterConnection: TISIndyTCPEvent Read fDoAfterConnection
       Write fDoAfterConnection;
     Property LastNwRtnData: ansistring read FRtnData;
     Property LastNwTransType: TTCPTransactionTypes read FRtnTrnctType;
 {$IFNDEF  SuppressIPMetering}
-    Property TimeStampMetering: boolean read FTimeStampMetering
+    Property TimeStampMetering: Boolean read FTimeStampMetering
       write SetTimeStampMetering;
 {$ENDIF}
   end;
@@ -477,7 +478,7 @@ Type
     // ACommand: ansistring;
     Constructor Create(ACommand: ansistring; ARtn: TNoWaitTCPReturn;
       ANoWaitRtnLst: TStrings);
-    Function IsValid: boolean;
+    Function IsValid: Boolean;
     Function Push(AData: ansistring): integer; override;
     Function PushNoWait(ACommand: TNoWaitRtnThrdData): integer;
   end;
@@ -489,22 +490,23 @@ Type
     FSrver: String;
     FPort: integer;
     FIdleCount: integer;
-    FPermHold: boolean;
+    FPermHold: Boolean;
     FRtnFunction: TNoWaitTCPReturn;
     FTrdTCPClient: TISIndyTCPClient;
-    FThreadActive: boolean;
+    FThreadActive: Boolean;
     FCommands: TWaitData;
     FCurrentQueueOfNWReqLength: integer;
 {$IFNDEF  SuppressIPMetering}
-    FThreadTimeStampMetering: boolean;
-    procedure SetThreadTimeStampMetering(const Value: boolean);
+    FThreadTimeStampMetering: Boolean;
+    procedure SetThreadTimeStampMetering(const Value: Boolean);
 {$ENDIF}
+    Function LockTryAcquire: Boolean;
     Function TrdTCPClient: TISIndyTCPClient;
     procedure ChnlTerminating(AObj: TObject);
     procedure SyncReturnNW;
     procedure ProcessAndFreeCommand(Var ACommand: TNoWaitRtnThrdData);
-    function GetPermHold: boolean;
-    procedure SetPermHold(const Value: boolean);
+    function GetPermHold: Boolean;
+    procedure SetPermHold(const Value: Boolean);
   Protected
     procedure TerminatedSet; Override;
     procedure Execute; override;
@@ -517,20 +519,20 @@ Type
     Constructor Create(ASrver: String; APort: integer;
       AOnTerminate: TNotifyEvent);
     Destructor Destroy; Override;
-    Function ServerDetailsNoWait(ARtn: TNoWaitTCPReturn): boolean;
+    Function ServerDetailsNoWait(ARtn: TNoWaitTCPReturn): Boolean;
     Function ServerConnectionsNoWait(AResults: TStrings;
-      ARegThisValue: ansistring; ARtn: TNoWaitTCPReturn): boolean;
+      ARegThisValue: ansistring; ARtn: TNoWaitTCPReturn): Boolean;
     // Run a single command in this unique socket and sychronize
     // returned data with main thread
     Function SimpleActionNoWaitTransaction(ACommand: ansistring;
-      ANoWaitRtnLst: TStrings; ARtn: TNoWaitTCPReturn): boolean;
+      ANoWaitRtnLst: TStrings; ARtn: TNoWaitTCPReturn): Boolean;
     Function AddNoWaitCommand(ACommand: TNoWaitRtnThrdData): integer;
     Function ChnlConnectionDetails: String;
     Function TextID: String;
     Procedure SetData(ASrver: String; APort: integer);
-    Property PermHold: boolean read GetPermHold write SetPermHold;
+    Property PermHold: Boolean read GetPermHold write SetPermHold;
 {$IFNDEF  SuppressIPMetering}
-    Property ThreadTimeStampMetering: boolean read FThreadTimeStampMetering
+    Property ThreadTimeStampMetering: Boolean read FThreadTimeStampMetering
       write SetThreadTimeStampMetering;
 {$ENDIF}
   End;
@@ -551,20 +553,20 @@ Type
     // Manages NoWait List (FNoWaitRtnThrdData) and Full Duplex Requests (FWaiting)
       : TCriticalSection;
     FCurrentQueueOfRequests, FCurrentQueueOfNWRequests, FLockCount: integer;
-    fFDDispFrmWriteThread, fReleaseThreads, FOffThreadDestroy: boolean;
+    fFDDispFrmWriteThread, fReleaseThreads, FOffThreadDestroy: Boolean;
     // FOnLogMsg: TISIndyLogEvent;
     // The Read thread loops thru read loop until terminated or read loop returns false
-    Function ReadLoop: boolean;
-    Function WriteLoop: boolean;
+    Function ReadLoop: Boolean;
+    Function WriteLoop: Boolean;
     Function AddNoWaitSyncCommand(ACommand: TNoWaitRtnThrdData): integer;
     function DoSimpleDuplexRemoteAction(ACommand: ansistring): ansistring;
     // Sets up a relay service frm TISIndyTCPFullDuplexClient DoSimpleDuplexRemoteAction
     // RemoteServerRelay#IP#Host Address or IP:Port
     Function SetOngoingConnections(AConnectData: ansistring): ansistring;
     Function DropCoupledSession: ansistring;
-    Function TrySetFullDuplex: boolean;
+    Function TrySetFullDuplex: Boolean;
     Function DplxWriteNoWaitCriticalSectionLock: TCriticalSection;
-    procedure SetSynchronizeResults(const Value: boolean);
+    procedure SetSynchronizeResults(const Value: Boolean);
     procedure SyncReturnDuplxCltNW;
     procedure ProcessAndFreeNwCommand(Var ACommand: TWaitData);
   Protected
@@ -574,12 +576,12 @@ Type
       Base level Returns Full Duplex State }
     Procedure SyncReturn(AMethod: TThreadMethod); Override;
     function ProcessNonDuplexIncomingTransaction(Trans, Key: ansistring;
-      TrnctType: TTCPTransactionTypes): boolean; // virtual;
+      TrnctType: TTCPTransactionTypes): Boolean; // virtual;
     function ReadATransactionRecord(var ATrnctType: TTCPTransactionTypes;
       var AKey: ansistring): ansistring; override;
-    Procedure SetFullDuplex(Val: boolean); override;
+    Procedure SetFullDuplex(Val: Boolean); override;
     Function TestTimeStamp(APayload: ansistring; Atest: integer = 5000)
-      : boolean;
+      : Boolean;
     Function MakeTimeStamp: ansistring;
   Public
     Constructor StartAccess(const AServerName: String; APort: integer;
@@ -588,8 +590,8 @@ Type
     Function FullDuplexDispatch(AData: ansistring; AKey: ansistring
 {$IFNDEF NextGen}
       = '' // Not Next Gen
-{$ENDIF} ): boolean; override;
-    Function OffThreadDestroy(DoOnDestroyProcess: boolean): boolean;
+{$ENDIF} ): Boolean; override;
+    Function OffThreadDestroy(DoOnDestroyProcess: Boolean): Boolean;
     // Destroy takes some time as threads need to terminate
     // Use OffThreadDestroy to take this process outside main thread
     // Happens in Rx or TX threads Destroy
@@ -597,31 +599,31 @@ Type
     Function FullDuplexDispatchNoWait(AData: ansistring;
       AMaxQueue: integer): integer;
     //
-    Function DropAllRemoteSessions: boolean;
+    Function DropAllRemoteSessions: Boolean;
     // Disconnect a coupled session at remote end
     // Pass on the drop to any follow on on the follow on
-    Function ServerSetLinkConnection(ALinkThisValue: ansistring): boolean;
+    Function ServerSetLinkConnection(ALinkThisValue: ansistring): Boolean;
     // Link to this ALinkThisValue if Advertised on Server
     Function ServerSetFollowonConnection(const AServerName: String;
-      APort: integer): boolean;
+      APort: integer): Boolean;
     // Add Follow on Duplex on Server
-    Function ServerLinkFromConnectionText(AConnectionText: string): boolean;
+    Function ServerLinkFromConnectionText(AConnectionText: string): Boolean;
     // Decode  AConnectionText and if it is free call ServerSetLinkConnection
 
     Function ServerConnectionsNoWait(AResults: TStrings;
-      ARegThisValue: ansistring; ARtn: TNoWaitTCPReturn): boolean;
+      ARegThisValue: ansistring; ARtn: TNoWaitTCPReturn): Boolean;
     Function AnsiTransactionNoWait(AAnsiString: ansistring; AResults: TStrings;
-      ARtn: TNoWaitTCPReturn): boolean;
+      ARtn: TNoWaitTCPReturn): Boolean;
     Function MessageWaitState: String;
 
     Class Function RefValueFromConnectionListValue(AListValue: String;
-      out IsFree: boolean): ansistring;
+      out IsFree: Boolean): ansistring;
     procedure DropThread(AThread: TThread);
     // Property OnLogMsg: TISIndyLogEvent Read FOnLogMsg write FOnLogMsg;
     // must not sync with main thread
     Property OnSimpleDuplexRemoteAction: TComandActionAnsi
       read FOnSimpleDuplexRemoteAction write FOnSimpleDuplexRemoteAction;
-    Property SynchronizeResults: boolean read FSynchronizeResults
+    Property SynchronizeResults: Boolean read FSynchronizeResults
       write SetSynchronizeResults;
     Property PermHold;
   End;
@@ -648,13 +650,13 @@ Type
     Procedure SetValue(Val: TDateTime);
     Function AsString: string;
     Function TransString: ansistring;
-    Function FromTransString(AData: ansistring): boolean;
+    Function FromTransString(AData: ansistring): Boolean;
     Function DelayOfLessThan(ATestMilliSecs: integer;
-      ARef: TDateTime = 0.0): boolean;
+      ARef: TDateTime = 0.0): Boolean;
     Function DeltaMilliSecs(ARef: TDateTime = 0.0): Double;
     // mSeconds since set time  Default use Now
 
-    case ws: boolean of
+    case ws: Boolean of
       true:
         (FDateTime: Double);
       False:
@@ -666,23 +668,23 @@ Type
     Flag: ansistring;
     TimeRec: TTimeRec;
     Function TimeAgoAsText(ARef: TDateTime): String;
-    Function LoadFromTimeStampData(AData: ansistring): boolean;
+    Function LoadFromTimeStampData(AData: ansistring): Boolean;
   end;
 
   TArrayOfMeteredTimes = Array of TMeterRecWithFlag;
 Function StringsFrmMeteredData(ADataStrings: TStrings;
-  ADataIn: ansistring): boolean;
-Function SplitMeteredData(Var AData, AMeteredBit: ansistring): boolean;
+  ADataIn: ansistring): Boolean;
+Function SplitMeteredData(Var AData, AMeteredBit: ansistring): Boolean;
 Procedure AddSetMeteredTimeRecAsString(Var AData: ansistring;
   Const AFlag: ansistring);
 Function AddMeteredTimeRecAsString(Const AFlag: ansistring): ansistring;
 Function ArrayOfMeteredTimes(AData: ansistring): TArrayOfMeteredTimes;
 Function PackTransaction(const AData, AEncryptKey: ansistring;
-  AAddMetering: boolean { = false } ): ansistring;
+  AAddMetering: Boolean { = false } ): ansistring;
 Function PackString(AData: String; AEncryptKey: ansistring;
-  AAddMetering: boolean { = false } ): ansistring;
+  AAddMetering: Boolean { = false } ): ansistring;
 function PackRawString(AData: ansistring; AEncryptKey: ansistring;
-  AAddMetering: boolean { = false } ): ansistring;
+  AAddMetering: Boolean { = false } ): ansistring;
 {$ELSE}
 function PackTransaction(const AData, AEncryptKey: ansistring): ansistring;
 Function PackString(AData: String; AEncryptKey: ansistring): ansistring;
@@ -693,7 +695,7 @@ procedure Encrypt(ABufferSize: Longword; ABufferPointer: pointer;
 Procedure CopyMemory(ADestination, ASource: pointer; AMemLen: Longword);
 // : LongWord;
 function DecodeIpAddress(WebAddress: PAnsiChar): ansistring;
-function IsIPAddress(var IpAdd: Longword; WebAddress: PAnsiChar): boolean;
+function IsIPAddress(var IpAdd: Longword; WebAddress: PAnsiChar): Boolean;
 
 // Potentially Three Lines
 // ABC123<>!    Above 127 ^A^B^C^1^2^3^<^>^!
@@ -705,7 +707,7 @@ function BytesToTextString(const ByteData: array of Byte;
 
 {$IFDEF NEXTGEN}
 {$IFDEF Debug}
-Function OpenDebugBreakPointsInAndroid: boolean;
+Function OpenDebugBreakPointsInAndroid: Boolean;
 {$ENDIF}
 {$ENDIF}
 {$IFDEF NextGen}
@@ -910,7 +912,7 @@ Function GlobalUsageCounts: string;
 Procedure GblIndyComsObjectFinalize;
 
 Var
-  GblIndyComsInFinalize: boolean = False;
+  GblIndyComsInFinalize: Boolean = False;
 {$IFNDEF  SuppressIPMetering}
   gblMeterSleep: integer = 1;
 {$ENDIF}
@@ -945,7 +947,7 @@ const
 
 {$IFNDEF  SuppressIPMetering}
 
-Function SplitMeteredData(Var AData, AMeteredBit: ansistring): boolean;
+Function SplitMeteredData(Var AData, AMeteredBit: ansistring): Boolean;
 var
   Idx, SplitLength: integer;
 begin
@@ -988,7 +990,7 @@ Begin
 End;
 
 Function StringsFrmMeteredData(ADataStrings: TStrings;
-  ADataIn: ansistring): boolean;
+  ADataIn: ansistring): Boolean;
 Var
   DataArray: TArrayOfMeteredTimes;
   Idx: integer;
@@ -1303,7 +1305,7 @@ begin
   End;
 end;
 
-function IsIPAddress(var IpAdd: Longword; WebAddress: PAnsiChar): boolean;
+function IsIPAddress(var IpAdd: Longword; WebAddress: PAnsiChar): Boolean;
 // IpAdd from  inet_addr >> If no error occurs, inet_addr returns an unsigned long containing a suitable binary representation of the Internet address given. If the passed-in AnsiString does not contain a legitimate Internet address, for example if a portion of an "a.b.c.d" address exceeds 255, inet_addr returns the value INADDR_NONE.
 var
   s: String;
@@ -1350,7 +1352,7 @@ End;
 {$IFDEF NEXTGEN}
 {$IFDEF Debug}
 
-Function OpenDebugBreakPointsInAndroid: boolean;
+Function OpenDebugBreakPointsInAndroid: Boolean;
 begin
   Result := true;
 end;
@@ -1602,7 +1604,7 @@ end;
 {$IFNDEF  SuppressIPMetering}
 
 Function PackTransaction(const AData, AEncryptKey: ansistring;
-  AAddMetering: boolean): ansistring;
+  AAddMetering: Boolean): ansistring;
 {$ELSE}
 
 function PackTransaction(const AData, AEncryptKey: ansistring): ansistring;
@@ -1691,13 +1693,13 @@ end;
 {$IFNDEF  SuppressIPMetering}
 
 function PackRawString(AData: ansistring; AEncryptKey: ansistring;
-  AAddMetering: boolean): ansistring;
+  AAddMetering: Boolean): ansistring;
 Begin
   Result := PackTransaction(cMvRawStrm + AData, AEncryptKey, AAddMetering);
 End;
 
 Function PackString(AData: String; AEncryptKey: ansistring;
-  AAddMetering: boolean): ansistring;
+  AAddMetering: Boolean): ansistring;
 {$ELSE}
 
 function PackRawString(AData: ansistring; AEncryptKey: ansistring): ansistring;
@@ -1726,7 +1728,7 @@ End;
 
 { TISIndyTCPClient }
 
-function TISIndyTCPClient.Activate: boolean;
+function TISIndyTCPClient.Activate: Boolean;
 begin
   Try
     Result := Active;
@@ -1766,7 +1768,7 @@ begin
     , TrnsType, Key, Result);
 end;
 
-Function TISIndyTCPClient.CheckConnection: boolean;
+Function TISIndyTCPClient.CheckConnection: Boolean;
 begin
   if Not Active then
     If FDoNotTryAgainUntil < Now Then
@@ -1792,7 +1794,7 @@ begin
 end;
 
 function TISIndyTCPClient.CopyLargeServerFileToStream(AStream: Tstream;
-  const AServerFileName: ansistring): boolean;
+  const AServerFileName: ansistring): Boolean;
 var
   Rtn, Key, Trans: ansistring;
   Sz, NxtBlock: Int64;
@@ -1965,7 +1967,7 @@ begin
   End;
 end;
 
-function TISIndyTCPClient.GetActive: boolean;
+function TISIndyTCPClient.GetActive: Boolean;
 Var
   Socket: TIdIOHandlerSocket;
 begin
@@ -2122,7 +2124,7 @@ begin
   Result := FConnection as TIdTCPClient;
 end;
 
-function TISIndyTCPClient.IsLinked: boolean;
+function TISIndyTCPClient.IsLinked: Boolean;
 Var
   SendData, KeyTxt, Response: ansistring;
   Rtn: TTCPTransactionTypes;
@@ -2168,7 +2170,7 @@ begin
     ISIndyUtilsException(Self, '#' + ' Log Data Response = ' + Result);
 end;
 
-function TISIndyTCPClient.MakeConnection: boolean;
+function TISIndyTCPClient.MakeConnection: Boolean;
 var
   SPt, ss, s, Key: ansistring;
   Rst: TTCPTransactionTypes;
@@ -2318,7 +2320,7 @@ begin
   end;
 end;
 
-function TISIndyTCPClient.PollDue: boolean;
+function TISIndyTCPClient.PollDue: Boolean;
 Var
   ObjTime: TTimeSpan;
 begin
@@ -2340,7 +2342,7 @@ begin
 end;
 
 function TISIndyTCPClient.PutLargeStreamToServer(AStream: Tstream;
-  const AServerFileName: ansistring): boolean;
+  const AServerFileName: ansistring): Boolean;
 var
   Rtn, Key, Trans: ansistring;
   Sz, NxtBlock: Int64;
@@ -2410,7 +2412,7 @@ begin
 end;
 
 function TISIndyTCPClient.Reconnect(const ACurrentTransanction
-  : ansistring): boolean;
+  : ansistring): Boolean;
 var
   ActiveDataSz, ActiveDataStart: integer;
 begin
@@ -2554,7 +2556,7 @@ begin
 end;
 
 function TISIndyTCPClient.ServerConnections(AResults: TStrings;
-  ARegThisValue: ansistring): boolean;
+  ARegThisValue: ansistring): Boolean;
 var
   Rtn, Key, Trans: ansistring;
   Rtns: String;
@@ -2631,7 +2633,7 @@ begin
 end;
 
 function TISIndyTCPClient.ServerSetRefConnection(AReferenceValue
-  : ansistring): boolean;
+  : ansistring): Boolean;
 // Add  AReferenceValue checks AReferenceValue exists on server
 // Similar to
 // function TISIndyTCPClient.ServerConnections(nil, ARegThisValue: ansistring)
@@ -2674,7 +2676,7 @@ begin
   End;
 end;
 
-procedure TISIndyTCPClient.SetActive(const Value: boolean);
+procedure TISIndyTCPClient.SetActive(const Value: Boolean);
 begin
   if Value then
   Begin
@@ -2694,7 +2696,7 @@ begin
   FDoNotTryAgainUntil := 0.0;
 end;
 
-procedure TISIndyTCPClient.SetPermHold(const Value: boolean);
+procedure TISIndyTCPClient.SetPermHold(const Value: Boolean);
 begin
   FPermHold := Value;
   if FPermHold then
@@ -2713,7 +2715,7 @@ end;
 
 {$IFNDEF  SuppressIPMetering}
 
-procedure TISIndyTCPClient.SetTimeStampMetering(const Value: boolean);
+procedure TISIndyTCPClient.SetTimeStampMetering(const Value: Boolean);
 begin
   FTimeStampMetering := Value;
 end;
@@ -2992,7 +2994,7 @@ begin
   End;
 end;
 
-function TISIndyTCPBase.BindingIsLocal(ABind: TIdSocketHandle): boolean;
+function TISIndyTCPBase.BindingIsLocal(ABind: TIdSocketHandle): Boolean;
 Var
   Ip1, IP2, ss: String;
   EndCh, StartCh: PChar;
@@ -3033,7 +3035,7 @@ begin
   Result := #13#10 + BytesToTextString(AData, 50);
 end;
 
-function TISIndyTCPBase.CallOnLocalSubNet: boolean;
+function TISIndyTCPBase.CallOnLocalSubNet: Boolean;
 Var
   Socket: TIdIOHandlerSocket;
 begin
@@ -3042,7 +3044,7 @@ begin
     Result := BindingIsLocal(Socket.Binding)
 end;
 
-function TISIndyTCPBase.CheckConnection: boolean;
+function TISIndyTCPBase.CheckConnection: Boolean;
 Var
   Socket: TIdIOHandlerSocket;
 begin
@@ -3076,7 +3078,7 @@ begin
   end;
 end;
 
-function TISIndyTCPBase.CheckReadBusy: boolean;
+function TISIndyTCPBase.CheckReadBusy: Boolean;
 Var
   TM: TTimeSpan;
 begin
@@ -3095,7 +3097,7 @@ begin
   end;
 end;
 
-function TISIndyTCPBase.CheckWriteBusy: boolean;
+function TISIndyTCPBase.CheckWriteBusy: Boolean;
 Var
   TM: TTimeSpan;
 begin
@@ -3132,7 +3134,7 @@ begin
     ISIndyUtilsException(Self, '#TISIndyTCPBase.Close Connection ::' + TextID);
 end;
 
-function TISIndyTCPBase.CloseIsObjGracefully: boolean;
+function TISIndyTCPBase.CloseIsObjGracefully: Boolean;
 begin
   ApplicationFlagThreadMsg('TISIndyTCPBase.CloseIsObjGracefully ' + TextID);
   Result := False;
@@ -3194,7 +3196,7 @@ procedure TISIndyTCPBase.DecodeIndyTCPBaseTransStart(const ABuffer
 // S       Data>>>>>>>>>>>>>>>>>>>>>>>>>Transaction Sz>>>>>>>>>>>>>>>>>T
 // <1234KEYADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATAADATA>
 // ^                        Transaction Size                   ^
-{ Sub } Function FormatInvalid(ASz: integer; ABadStart: boolean): ansistring;
+{ Sub } Function FormatInvalid(ASz: integer; ABadStart: Boolean): ansistring;
   Var
     TxtBuffer: TIdBytes;
     i: integer;
@@ -3302,7 +3304,7 @@ function TISIndyTCPBase.DecodeSafeFileTransferPath(ACmdPlusPath: string)
   : ansistring;
 var
   i: integer;
-  UnixPath: boolean;
+  UnixPath: Boolean;
 
 begin
   Result := '';
@@ -3437,7 +3439,7 @@ begin
   End;
 end;
 
-function TISIndyTCPBase.DoFullDuplexIncomingAction(AData: ansistring): boolean;
+function TISIndyTCPBase.DoFullDuplexIncomingAction(AData: ansistring): Boolean;
 Var
   ErrorMsg: ansistring;
 
@@ -3493,7 +3495,7 @@ begin
 end;
 
 class function TISIndyTCPBase.ExpandSrvRefCode(const ACode: string;
-  out ASrv: String; out AServPort: integer): boolean;
+  out ASrv: String; out AServPort: integer): Boolean;
 Var
   Idp: integer;
   PrtStr: string;
@@ -3555,7 +3557,7 @@ end;
 function TISIndyTCPBase.FullDuplexDispatch(AData: ansistring; AKey: ansistring
 {$IFNDEF NextGen}
   = '' // No Default in Next Gen
-{$ENDIF} ): boolean;
+{$ENDIF} ): Boolean;
 var
   ToSend, Sent: LongInt;
   DataToGo, Tst: ansistring;
@@ -3564,7 +3566,7 @@ var
   DebugString: String;
 {$ENDIF}
 {$IFNDEF  SuppressIPMetering}
-  MeteringFlag: boolean;
+  MeteringFlag: Boolean;
 begin
   if (Self is TISIndyTCPClient) then
     MeteringFlag := TISIndyTCPClient(Self).TimeStampMetering
@@ -3744,7 +3746,7 @@ begin
     End;
 end;
 
-function TISIndyTCPBase.IsUploadAcceptTempFile(AFileName: string): boolean;
+function TISIndyTCPBase.IsUploadAcceptTempFile(AFileName: string): Boolean;
 Var
   Tst: String;
 begin
@@ -3755,7 +3757,7 @@ end;
 
 function TISIndyTCPBase.IsValid(AStartOffset: integer; var ABuffer: TIdBytes;
   ACharsRead: integer; out ATransactionSize: Longword;
-  out AKey, ANewData: ansistring): boolean;
+  out AKey, ANewData: ansistring): Boolean;
 Var
   LKey, NewBufferStr: ansistring;
   LTransactionSize: Longword;
@@ -3838,7 +3840,7 @@ begin
     Result := Socket.Binding.IP;
 end;
 
-function TISIndyTCPBase.LockConnection: boolean;
+function TISIndyTCPBase.LockConnection: Boolean;
 Var
   LoopCount: integer;
 begin
@@ -3874,7 +3876,7 @@ begin
 end;
 
 function TISIndyTCPBase.LockConnectionCon(out AConnection
-  : TIdTCPConnection): boolean;
+  : TIdTCPConnection): Boolean;
 // Returns FConnection is true if connected
 Var
   Socket: TIdIOHandlerSocket;
@@ -3908,7 +3910,7 @@ begin
 end;
 
 function TISIndyTCPBase.LockConnectionSkt(out ASocket
-  : TIdIOHandlerSocket): boolean;
+  : TIdIOHandlerSocket): Boolean;
 // Returns IoHandler and is true if connected
 begin
   Result := False;
@@ -4151,7 +4153,7 @@ var
   buffer: TIdBytes;
   TransactionSize: Longword;
   NewData: ansistring;
-  ShouldClose: boolean;
+  ShouldClose: Boolean;
   ss: ansistring;
   Socket: TIdIOHandlerSocket;
 begin
@@ -4568,7 +4570,7 @@ begin
   End;
 end;
 
-function TISIndyTCPBase.RecentData(AGap: TTimeSpan): boolean;
+function TISIndyTCPBase.RecentData(AGap: TTimeSpan): Boolean;
 Var
   Tst: TTimeSpan;
 begin
@@ -4788,7 +4790,7 @@ procedure TISIndyTCPBase.SendTransaction(AData: ansistring;
 var
   ToSend: LongInt;
   ErrorCount: integer;
-  SaveDuplex: boolean;
+  SaveDuplex: Boolean;
 begin
   SaveDuplex := fFullDuplex;
   try
@@ -4934,7 +4936,7 @@ begin
   end;
 end;
 
-procedure TISIndyTCPBase.SetFullDuplex(Val: boolean);
+procedure TISIndyTCPBase.SetFullDuplex(Val: Boolean);
 begin
   // No Action
 end;
@@ -5082,7 +5084,7 @@ begin
 end;
 {$ENDIF}
 
-function TISIndyTCPBase.WaitForData(AWaitTime: integer): boolean;
+function TISIndyTCPBase.WaitForData(AWaitTime: integer): Boolean;
 Var
   LCount, LocalWait: integer;
   Socket: TIdIOHandlerSocket;
@@ -5757,7 +5759,7 @@ end;
 
 function TISIndyTCPFullDuplexClient.AnsiTransactionNoWait
   (AAnsiString: ansistring; AResults: TStrings; ARtn: TNoWaitTCPReturn)
-  : boolean;
+  : Boolean;
 var
   // ThisCmd:TNoWaitRtnThrdData;
   Trans: ansistring;
@@ -5876,7 +5878,7 @@ begin
   Result := fDplxWriteNoWaitCriticalSectionLock;
 end;
 
-function TISIndyTCPFullDuplexClient.DropAllRemoteSessions: boolean;
+function TISIndyTCPFullDuplexClient.DropAllRemoteSessions: Boolean;
 // Disconnect a coupled session at remote end
 // Pass on the drop to any follow on on the follow on
 var
@@ -5946,7 +5948,7 @@ begin
 end;
 
 function TISIndyTCPFullDuplexClient.FullDuplexDispatch(AData,
-  AKey: ansistring): boolean;
+  AKey: ansistring): Boolean;
 begin
   if fFDDispFrmWriteThread or (FCoupledSession <> nil) then
   begin
@@ -6069,7 +6071,7 @@ begin
 end;
 
 function TISIndyTCPFullDuplexClient.OffThreadDestroy(DoOnDestroyProcess
-  : boolean): boolean;
+  : Boolean): Boolean;
 // Destroy takes some time as threads need to terminate
 // Use OffThreadDestroy to take this process outside main thread
 // Happens in Rx or TX threads Destroy
@@ -6171,7 +6173,7 @@ begin
 end;
 
 function TISIndyTCPFullDuplexClient.ProcessNonDuplexIncomingTransaction(Trans,
-  Key: ansistring; TrnctType: TTCPTransactionTypes): boolean;
+  Key: ansistring; TrnctType: TTCPTransactionTypes): Boolean;
 Var
   Echo, Rtn, RawRtn: ansistring;
 begin
@@ -6323,7 +6325,7 @@ begin
     End;
 end;
 
-function TISIndyTCPFullDuplexClient.ReadLoop: boolean;
+function TISIndyTCPFullDuplexClient.ReadLoop: Boolean;
 Var
   TrnctType: TTCPTransactionTypes;
   Key: ansistring;
@@ -6447,7 +6449,7 @@ begin
 End;
 
 class function TISIndyTCPFullDuplexClient.RefValueFromConnectionListValue
-  (AListValue: String; out IsFree: boolean): ansistring;
+  (AListValue: String; out IsFree: Boolean): ansistring;
 Var
   Marker: integer;
 begin
@@ -6468,7 +6470,7 @@ begin
 end;
 
 function TISIndyTCPFullDuplexClient.ServerConnectionsNoWait(AResults: TStrings;
-  ARegThisValue: ansistring; ARtn: TNoWaitTCPReturn): boolean;
+  ARegThisValue: ansistring; ARtn: TNoWaitTCPReturn): Boolean;
 var
   // ThisCmd:TNoWaitRtnThrdData;
   Trans, Cmd: ansistring;
@@ -6497,11 +6499,11 @@ begin
 end;
 
 function TISIndyTCPFullDuplexClient.ServerLinkFromConnectionText(AConnectionText
-  : string): boolean;
+  : string): Boolean;
 // Decode  AConnectionText and if it is free call ServerSetLinkConnection
 Var
   ref: ansistring;
-  IsFree: boolean;
+  IsFree: Boolean;
 begin
   ref := RefValueFromConnectionListValue(AConnectionText, IsFree);
   if IsFree then
@@ -6511,7 +6513,7 @@ begin
 end;
 
 function TISIndyTCPFullDuplexClient.ServerSetFollowonConnection
-  (const AServerName: String; APort: integer): boolean;
+  (const AServerName: String; APort: integer): Boolean;
 var
   Rtn, Key, Trans: ansistring;
   Command: ansistring;
@@ -6541,7 +6543,7 @@ begin
 end;
 
 function TISIndyTCPFullDuplexClient.ServerSetLinkConnection(ALinkThisValue
-  : ansistring): boolean;
+  : ansistring): Boolean;
 // Link to this ALinkThisValue if Advertised on Server
 var
   Rtn, Key, Trans: ansistring;
@@ -6581,7 +6583,7 @@ begin
       '#' + '!!Failed!! cRemoteSetServerRelay Trn::' + Rtn);;
 end;
 
-procedure TISIndyTCPFullDuplexClient.SetFullDuplex(Val: boolean);
+procedure TISIndyTCPFullDuplexClient.SetFullDuplex(Val: Boolean);
 begin
   if fFullDuplex <> Val then
     if fDplxReadCriticalSectionLock <> nil then
@@ -6609,7 +6611,7 @@ Var
   Inx, Tst, ConPort: integer;
   NewCon: TISIndyTCPBase;
   Address, PortStr: ansistring;
-  WillOwn: boolean;
+  WillOwn: Boolean;
 
 begin
   if FCoupledSession <> nil then
@@ -6679,7 +6681,7 @@ begin
 end;
 
 procedure TISIndyTCPFullDuplexClient.SetSynchronizeResults
-  (const Value: boolean);
+  (const Value: Boolean);
 begin
   FSynchronizeResults := Value;
 end;
@@ -6755,7 +6757,7 @@ begin
 end;
 
 function TISIndyTCPFullDuplexClient.TestTimeStamp(APayload: ansistring;
-  Atest: integer): boolean;
+  Atest: integer): Boolean;
 Var
   TstTmStmp: TTimeRec;
 begin
@@ -6765,7 +6767,7 @@ begin
     Result := False;
 end;
 
-function TISIndyTCPFullDuplexClient.TrySetFullDuplex: boolean;
+function TISIndyTCPFullDuplexClient.TrySetFullDuplex: Boolean;
 begin
   if not fFullDuplex then
     if fDplxReadCriticalSectionLock <> nil then
@@ -6783,12 +6785,12 @@ begin
   Result := fFullDuplex;
 end;
 
-function TISIndyTCPFullDuplexClient.WriteLoop: boolean;
+function TISIndyTCPFullDuplexClient.WriteLoop: Boolean;
 Var
   // TrnctType: TTCPTransactionTypes;
   // Key: ansistring;
   // Data: ansistring;
-  DoPoll: boolean;
+  DoPoll: Boolean;
   NxtSend: TWaitData; // TNoWaitRtnThrdData;
 {$IFDEF Debug}
   PollLast: TTimeSpan; // used to confirm FNextPoll is updated
@@ -6998,12 +7000,14 @@ end;
 
 procedure TIsMsgBuffer.AddBuffMsgStr(AMsg: String);
 begin
-  FMsgBfrListLock.Acquire;
-  try
-    FData.Add(AMsg);
-  finally
-    FMsgBfrListLock.Release;
-  end;
+  If MsgBfrListLockTryAcquire then
+    ApplicationFlagThreadMsg(Self, 'No Lock AddBuffMsgStr')
+  Else
+    try
+      FData.Add(AMsg);
+    finally
+      FMsgBfrListLock.Release;
+    end;
 end;
 
 constructor TIsMsgBuffer.Create;
@@ -7019,37 +7023,63 @@ begin
   inherited;
 end;
 
-function TIsMsgBuffer.MsgToRead(out AMsg: String; AReadLines: integer): boolean;
+function TIsMsgBuffer.MsgBfrListLockTryAcquire: Boolean;
+Var
+  Count: integer;
+begin
+  if FMsgBfrListLock = nil then
+    Result := False
+  else
+    Result := FMsgBfrListLock.TryEnter;
+
+  if Result or (FMsgBfrListLock = nil) then
+    Exit;
+  Count := 5;
+
+  While (Count > 0) and Not Result do
+  begin
+    Dec(Count);
+    Sleep(100);
+    Result := FMsgBfrListLock.TryEnter;
+  end;
+
+  if not Result then
+    ApplicationFlagThreadMsg(Self, 'No Lock');
+end;
+
+function TIsMsgBuffer.MsgToRead(out AMsg: String; AReadLines: integer): Boolean;
 begin
   Result := False;
   if (FData = nil) or (FData.Count < 1) then
     Exit;
 
   Result := true;
-  FMsgBfrListLock.Acquire;
-  Try
-    if AReadLines < 1 then
-    Begin
-      AMsg := FData.Text;
-      FData.Clear;
-    End
-    else if AReadLines < FData.Count then
-      MsgToRead(AMsg, 0)
-    else
-    Begin
-      AMsg := '';
-      While AReadLines > 0 do
-      begin
-        AMsg := AMsg + FData[0];
-        FData.Delete(0);
-        Dec(AReadLines);
-        If AReadLines > 0 then
-          AMsg := AMsg + CRLF;
-      end;
-    end
-  Finally
-    FMsgBfrListLock.Release;
-  End;
+  If MsgBfrListLockTryAcquire then
+    ApplicationFlagThreadMsg(Self, 'No Lock MsgToRead')
+  else
+    Try
+      if AReadLines < 1 then
+      Begin
+        AMsg := FData.Text;
+        FData.Clear;
+      End
+      else if AReadLines < FData.Count then
+        MsgToRead(AMsg, 0)
+      else
+      Begin
+        AMsg := '';
+        While AReadLines > 0 do
+        begin
+          AMsg := AMsg + FData[0];
+          FData.Delete(0);
+          Dec(AReadLines);
+          If AReadLines > 0 then
+            AMsg := AMsg + CRLF;
+        end;
+      end
+    Finally
+      FMsgBfrListLock.Release;
+    End;
 
 end;
 
@@ -7153,23 +7183,25 @@ begin
       Exit;
     end;
 
-    FLock.Acquire;
-    Try
-      if FCommands = nil then
-      begin
-        FCommands := ACommand;
-        FCurrentQueueOfNWReqLength := 1;
-      end
-      else if FCommands is TNoWaitRtnThrdData then
-        FCurrentQueueOfNWReqLength := TNoWaitRtnThrdData(FCommands)
-          .PushNoWait(ACommand)
-      else
-        ISIndyUtilsException(Self,
-          'AddNoWaitCommand is NOT TNoWaitRtnThrdData');
-      FIdleCount := 0;
-    finally
-      FLock.Release;
-    end;
+    If Not LockTryAcquire then
+      ApplicationFlagThreadMsg(Self, 'Unable to lock AddNoWaitCommand')
+    Else
+      Try
+        if FCommands = nil then
+        begin
+          FCommands := ACommand;
+          FCurrentQueueOfNWReqLength := 1;
+        end
+        else if FCommands is TNoWaitRtnThrdData then
+          FCurrentQueueOfNWReqLength := TNoWaitRtnThrdData(FCommands)
+            .PushNoWait(ACommand)
+        else
+          ISIndyUtilsException(Self,
+            'AddNoWaitCommand is NOT TNoWaitRtnThrdData');
+        FIdleCount := 0;
+      finally
+        FLock.Release;
+      end;
     Result := FCurrentQueueOfNWReqLength;
     Suspended := False;
   Except
@@ -7249,7 +7281,7 @@ procedure TNoWaitReturnThread.Execute;
 Var
   LocalCurrentCommand: TNoWaitRtnThrdData;
 {$IFDEF Debug}
-  IsDebugChl: boolean;
+  IsDebugChl: Boolean;
 {$ENDIF}
 begin
   while Not Terminated do
@@ -7290,14 +7322,17 @@ begin
           end
           else
           begin
-            FLock.Acquire;
-            try
-              LocalCurrentCommand := FCommands.Pop(FCommands)
-                as TNoWaitRtnThrdData;
-              FIdleCount := 0;
-            finally
-              FLock.Release;
-            end;
+            If Not LockTryAcquire then
+              ApplicationFlagThreadMsg(Self,
+                'Unable to lock TNoWaitReturnThread.Execute')
+            Else
+              try
+                LocalCurrentCommand := FCommands.Pop(FCommands)
+                  as TNoWaitRtnThrdData;
+                FIdleCount := 0;
+              finally
+                FLock.Release;
+              end;
           end;
         Except
           On E: Exception Do
@@ -7349,12 +7384,37 @@ begin
     End;
 end;
 
-function TNoWaitReturnThread.GetPermHold: boolean;
+function TNoWaitReturnThread.GetPermHold: Boolean;
 begin
   if FTrdTCPClient <> nil then
     Result := FTrdTCPClient.PermHold
   else
     Result := FPermHold;
+end;
+
+function TNoWaitReturnThread.LockTryAcquire: Boolean;
+Var
+  Count: integer;
+begin
+  if FLock = nil then
+    Result := False
+  else
+    Result := FLock.TryEnter;
+  if Result then
+    Exit
+  else
+  begin
+    Count := 5;
+    while Not Result and (Count > 0) do
+    Begin
+      Dec(Count);
+      Sleep(100);
+      Result := FLock.TryEnter;
+    End;
+
+  end;
+  if not Result then
+    ApplicationFlagThreadMsg(Self, 'FLock Fail');
 end;
 
 procedure TNoWaitReturnThread.ProcessAndFreeCommand(var ACommand
@@ -7374,24 +7434,26 @@ begin
   FThreadActive := true;
   Try
     Try
-      FLock.Acquire;
-      try
-        if not FTrdTCPClient.Activate then
-        Begin
-          ISIndyUtilsException(Self, '#Failed to Connect ' + FSrver + ':' +
-            IntToStr(FPort));
-          FreeAndNil(FTrdTCPClient);
-          FreeAndNil(ACommand);
-          Exit;
-        End;
+      If Not LockTryAcquire then
+        ApplicationFlagThreadMsg(Self, 'Unable to lock ProcessAndFreeCommand')
+      Else
+        try
+          if not FTrdTCPClient.Activate then
+          Begin
+            ISIndyUtilsException(Self, '#Failed to Connect ' + FSrver + ':' +
+              IntToStr(FPort));
+            FreeAndNil(FTrdTCPClient);
+            FreeAndNil(ACommand);
+            Exit;
+          End;
 
-        if not FTrdTCPClient.Active then
-        begin
-          FreeAndNil(FTrdTCPClient);
+          if not FTrdTCPClient.Active then
+          begin
+            FreeAndNil(FTrdTCPClient);
+          end;
+        finally
+          FLock.Release;
         end;
-      finally
-        FLock.Release;
-      end;
 
       if FTrdTCPClient <> nil then
       begin
@@ -7446,47 +7508,49 @@ begin
 end;
 
 function TNoWaitReturnThread.ServerConnectionsNoWait(AResults: TStrings;
-  ARegThisValue: ansistring; ARtn: TNoWaitTCPReturn): boolean;
+  ARegThisValue: ansistring; ARtn: TNoWaitTCPReturn): Boolean;
 Var
   Trans, Cmd: ansistring;
   NewCommand: TNoWaitRtnThrdData;
 begin
   Result := False;
-  FLock.Acquire;
-  try
-    if TrdTCPClient = nil then
-      Exit;
-    if FTrdTCPClient.Activate then
-      try
-        Cmd := FTrdTCPClient.SimpleRemoteAction(cRemoteServerConnections +
-          ARegThisValue);
-        Trans := PackTransaction(Cmd,
-          FTrdTCPClient.FRandomKey{$IFNDEF  SuppressIPMetering}
-          , ThreadTimeStampMetering)
+  If Not LockTryAcquire then
+    ApplicationFlagThreadMsg(Self, 'Unable to lock ServerConnectionsNoWait')
+  Else
+    try
+      if TrdTCPClient = nil then
+        Exit;
+      if FTrdTCPClient.Activate then
+        try
+          Cmd := FTrdTCPClient.SimpleRemoteAction(cRemoteServerConnections +
+            ARegThisValue);
+          Trans := PackTransaction(Cmd,
+            FTrdTCPClient.FRandomKey{$IFNDEF  SuppressIPMetering}
+            , ThreadTimeStampMetering)
 {$ELSE}
-          )
+            )
 {$ENDIF};
 
-        NewCommand := TNoWaitRtnThrdData.Create(Trans, ARtn, nil);
-        NewCommand.fNoWaitRtnFunctn := ARtn;
-        NewCommand.fNoWaitRtnLst := AResults;
-        // NewCommand.RawInfo := Cmd;
+          NewCommand := TNoWaitRtnThrdData.Create(Trans, ARtn, nil);
+          NewCommand.fNoWaitRtnFunctn := ARtn;
+          NewCommand.fNoWaitRtnLst := AResults;
+          // NewCommand.RawInfo := Cmd;
 
-        if NewCommand.IsValid then
-          Result := AddNoWaitCommand(NewCommand) > 0
-        else
-          NewCommand.Free;
-      Except
-        On E: Exception do
-          ISIndyUtilsException(Self, E, '# ServerDetailsNoWait');
-      end;
-  finally
-    FLock.Release;
-  end;
+          if NewCommand.IsValid then
+            Result := AddNoWaitCommand(NewCommand) > 0
+          else
+            NewCommand.Free;
+        Except
+          On E: Exception do
+            ISIndyUtilsException(Self, E, '# ServerDetailsNoWait');
+        end;
+    finally
+      FLock.Release;
+    end;
 end;
 
 function TNoWaitReturnThread.ServerDetailsNoWait
-  (ARtn: TNoWaitTCPReturn): boolean;
+  (ARtn: TNoWaitTCPReturn): Boolean;
 Var
   Trans, Cmd: ansistring;
   NewCommand: TNoWaitRtnThrdData;
@@ -7518,19 +7582,21 @@ procedure TNoWaitReturnThread.SetData(ASrver: String; APort: integer);
 begin
   if (ASrver = FSrver) and (APort = FPort) then
     Exit;
-  FLock.Acquire;
-  Try
-    FreeAndNil(FCommands);
-    FreeAndNil(FTrdTCPClient);
-    FSrver := ASrver;
-    FPort := APort;
-    TrdTCPClient;
-  Finally
-    FLock.Release;
-  End;
+  If Not LockTryAcquire then
+    ApplicationFlagThreadMsg(Self, 'Unable to lock SetData')
+  Else
+    Try
+      FreeAndNil(FCommands);
+      FreeAndNil(FTrdTCPClient);
+      FSrver := ASrver;
+      FPort := APort;
+      TrdTCPClient;
+    Finally
+      FLock.Release;
+    End;
 end;
 
-procedure TNoWaitReturnThread.SetPermHold(const Value: boolean);
+procedure TNoWaitReturnThread.SetPermHold(const Value: Boolean);
 begin
   FPermHold := Value;
   if FTrdTCPClient <> nil then
@@ -7539,14 +7605,14 @@ end;
 
 {$IFNDEF  SuppressIPMetering}
 
-procedure TNoWaitReturnThread.SetThreadTimeStampMetering(const Value: boolean);
+procedure TNoWaitReturnThread.SetThreadTimeStampMetering(const Value: Boolean);
 begin
   FThreadTimeStampMetering := Value;
 end;
 {$ENDIF}
 
 function TNoWaitReturnThread.SimpleActionNoWaitTransaction(ACommand: ansistring;
-  ANoWaitRtnLst: TStrings; ARtn: TNoWaitTCPReturn): boolean;
+  ANoWaitRtnLst: TStrings; ARtn: TNoWaitTCPReturn): Boolean;
 Var
   Trans, Cmd: ansistring;
   NewCommand: TNoWaitRtnThrdData;
@@ -7625,56 +7691,58 @@ end;
 
 function TNoWaitReturnThread.TrdTCPClient: TISIndyTCPClient;
 Var
-  KillClient: boolean;
+  KillClient: Boolean;
   s: string;
 begin
   Result := nil;
   Try
-    FLock.Acquire;
-    try
-      if FTrdTCPClient <> nil then
-      begin
-        KillClient := (FTrdTCPClient.fServerAddress <> FSrver) or
-          (FTrdTCPClient.fServerPort <> FPort);
-        if KillClient then
-          s := FTrdTCPClient.fServerAddress + '<>' + FSrver + ' Or ' +
-            IntToStr(FTrdTCPClient.fServerPort) + ' <> ' + IntToStr(FPort)
-        else
-          s := '';
-        KillClient := KillClient or Not FTrdTCPClient.Activate;
-        If KillClient then
-        Begin
-          s := s + ' Not Active  ';
-          ISIndyUtilsException(Self, '#Kill Client ' + s +
-            FTrdTCPClient.TextID);
-          FTrdTCPClient.FOnDestroy := nil;
-          FTrdTCPClient.CloseIsObjGracefully;
-          FreeAndNil(FTrdTCPClient);
-        End;
-        // Else
-        // ISIndyUtilsException(Self,'Not Kill Client in '+ FTrdTCPClient.TextID);
-      end;
-
-      If FTrdTCPClient = nil then
-        if (FSrver <> '') and (FPort > 15) then
-          try
-            FTrdTCPClient := TISIndyTCPClient.StartAccess(FSrver, FPort);
-            FTrdTCPClient.FOnDestroy := ChnlTerminating;
-            FTrdTCPClient.PermHold := FPermHold;
-            // {$IFNDEF  SuppressIPMetering}
-            // FTrdTCPClient.TimeStampMetering := FThreadTimeStampMetering;
-            // {$ENDIF}
-          Except
-            On E: Exception do
-            begin
-              ISIndyUtilsException(Self, E, 'TrdTCPClient');
-              FreeAndNil(FTrdTCPClient);
-            end;
+    If Not LockTryAcquire then
+      ApplicationFlagThreadMsg(Self, 'Unable to lock TrdTCPClient')
+    Else
+      try
+        if FTrdTCPClient <> nil then
+        begin
+          KillClient := (FTrdTCPClient.fServerAddress <> FSrver) or
+            (FTrdTCPClient.fServerPort <> FPort);
+          if KillClient then
+            s := FTrdTCPClient.fServerAddress + '<>' + FSrver + ' Or ' +
+              IntToStr(FTrdTCPClient.fServerPort) + ' <> ' + IntToStr(FPort)
+          else
+            s := '';
+          KillClient := KillClient or Not FTrdTCPClient.Activate;
+          If KillClient then
+          Begin
+            s := s + ' Not Active  ';
+            ISIndyUtilsException(Self, '#Kill Client ' + s +
+              FTrdTCPClient.TextID);
+            FTrdTCPClient.FOnDestroy := nil;
+            FTrdTCPClient.CloseIsObjGracefully;
+            FreeAndNil(FTrdTCPClient);
           End;
-      Result := FTrdTCPClient;
-    finally
-      FLock.Release;
-    end;
+          // Else
+          // ISIndyUtilsException(Self,'Not Kill Client in '+ FTrdTCPClient.TextID);
+        end;
+
+        If FTrdTCPClient = nil then
+          if (FSrver <> '') and (FPort > 15) then
+            try
+              FTrdTCPClient := TISIndyTCPClient.StartAccess(FSrver, FPort);
+              FTrdTCPClient.FOnDestroy := ChnlTerminating;
+              FTrdTCPClient.PermHold := FPermHold;
+              // {$IFNDEF  SuppressIPMetering}
+              // FTrdTCPClient.TimeStampMetering := FThreadTimeStampMetering;
+              // {$ENDIF}
+            Except
+              On E: Exception do
+              begin
+                ISIndyUtilsException(Self, E, 'TrdTCPClient');
+                FreeAndNil(FTrdTCPClient);
+              end;
+            End;
+        Result := FTrdTCPClient;
+      finally
+        FLock.Release;
+      end;
   Except
     On E: Exception Do
       ISIndyUtilsException(Self, E, 'TNoWaitReturnThread.TrdTCPClient');
@@ -7689,7 +7757,7 @@ begin
 end;
 
 function TTimeRec.DelayOfLessThan(ATestMilliSecs: integer;
-  ARef: TDateTime): boolean;
+  ARef: TDateTime): Boolean;
 Var
   Delta: Double;
 begin
@@ -7726,7 +7794,7 @@ begin
   End;
 end;
 
-function TTimeRec.FromTransString(AData: ansistring): boolean;
+function TTimeRec.FromTransString(AData: ansistring): Boolean;
 Var
   i, IStrt, IEnd: integer;
 {$IFDEF Nextgen}
@@ -7882,7 +7950,7 @@ begin
   fNoWaitRtnLst := ANoWaitRtnLst;
 end;
 
-function TNoWaitRtnThrdData.IsValid: boolean;
+function TNoWaitRtnThrdData.IsValid: Boolean;
 begin
   Result := Assigned(fNoWaitRtnFunctn) or (fNoWaitRtnLst <> nil);
 end;
@@ -7944,7 +8012,7 @@ end;
 { TMeterRecWithFlag }
 // https://docwiki.embarcadero.com/Libraries/Florence/en/System.SysUtils.Format#Properties
 
-function TMeterRecWithFlag.LoadFromTimeStampData(AData: ansistring): boolean;
+function TMeterRecWithFlag.LoadFromTimeStampData(AData: ansistring): Boolean;
 begin
   Result := TimeRec.FromTransString(AData);
   if Result then
